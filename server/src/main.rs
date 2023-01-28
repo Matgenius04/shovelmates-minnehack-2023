@@ -1,22 +1,38 @@
 mod authorization;
-mod chat_connection;
 mod db;
 
 use authorization::{create_token, hash_password};
-use db::Db;
+use db::UserDb;
 use log::{error, info, trace, warn};
 use secrecy::Secret;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
-use warp::{hyper::Response, ws::Ws, Filter};
+use warp::{hyper::Response, Filter};
 
-use crate::chat_connection::Message;
+#[derive(Serialize, Deserialize, Clone, Copy)]
+enum UserType {
+    Volunteer,
+    Senior,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct User {
     username: String,
+    name: String,
+    address: String,
+    location: (f64, f64),
+    user_type: UserType,
     salt: [u8; 32],
     password_hash: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+struct CreateAccountInfo {
+    username: String,
+    name: String,
+    address: String,
+    location: (f64, f64),
+    user_type: UserType,
+    password: Secret<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -25,13 +41,16 @@ struct LoginInfo {
     password: Secret<String>,
 }
 
-fn create_account(db: &Db, login_info: LoginInfo) -> Result<Response<String>, anyhow::Error> {
+fn create_account(
+    db: &UserDb,
+    create_account_info: CreateAccountInfo,
+) -> Result<Response<String>, anyhow::Error> {
     trace!(
         "Attempting to create an account for {}",
-        &login_info.username
+        &create_account_info.username
     );
 
-    if db.contains(&login_info.username)? {
+    if db.contains(&create_account_info.username)? {
         trace!("Attempted to create an account that already exists");
 
         return Ok(Response::builder()
@@ -41,24 +60,31 @@ fn create_account(db: &Db, login_info: LoginInfo) -> Result<Response<String>, an
 
     let salt = rand::random::<[u8; 32]>();
 
-    let password_hash = hash_password(&login_info.password, salt);
+    let password_hash = hash_password(&create_account_info.password, salt);
 
     let user = User {
-        username: login_info.username.to_owned(),
+        username: create_account_info.username.to_owned(),
+        name: create_account_info.name,
+        address: create_account_info.address,
+        location: create_account_info.location,
+        user_type: create_account_info.user_type,
         salt,
         password_hash,
     };
 
     db.add(&user)?;
 
-    info!("Created a new account for {}", &login_info.username);
+    info!(
+        "Created a new account for {}",
+        &create_account_info.username
+    );
 
     Ok(Response::builder()
         .status(200)
-        .body(create_token(&login_info.username)?)?)
+        .body(create_token(&create_account_info.username)?)?)
 }
 
-fn login(db: &Db, login_info: LoginInfo) -> Result<Response<String>, anyhow::Error> {
+fn login(db: &UserDb, login_info: LoginInfo) -> Result<Response<String>, anyhow::Error> {
     trace!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
@@ -97,20 +123,20 @@ fn login(db: &Db, login_info: LoginInfo) -> Result<Response<String>, anyhow::Err
 async fn main() {
     pretty_env_logger::init();
 
-    let db = Db::open("users");
+    let db = UserDb::open("users");
 
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
-        .and(warp::body::json::<LoginInfo>())
-        .map(
-            move |login_info: LoginInfo| match create_account(&create_account_db, login_info) {
+        .and(warp::body::json::<CreateAccountInfo>())
+        .map(move |create_account_info: CreateAccountInfo| {
+            match create_account(&create_account_db, create_account_info) {
                 Ok(reply) => Ok(reply),
                 Err(e) => {
                     error!("There was an error creating an account: {e:?}");
                     Response::builder().status(500).body(e.to_string())
                 }
-            },
-        );
+            }
+        });
 
     let login_db = db.to_owned();
     let login = warp::path!("api" / "login")
@@ -125,16 +151,7 @@ async fn main() {
             },
         );
 
-    let (message_tx, _) = broadcast::channel::<Message>(32);
-
-    let ws_route = warp::path!("api" / "ws")
-        .and(warp::ws())
-        .and(warp::any().map(move || message_tx.to_owned()))
-        .map(|ws: Ws, message_tx: broadcast::Sender<Message>| {
-            ws.on_upgrade(|socket| chat_connection::chat_connection(socket, message_tx))
-        });
-
-    let get = warp::get().and(ws_route.or(warp::fs::dir("../frontend/build")));
+    let get = warp::get().and(warp::fs::dir("../frontend/build"));
     let post = warp::post().and(create_account.or(login));
 
     let routes = get.or(post);

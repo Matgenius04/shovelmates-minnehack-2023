@@ -4,19 +4,19 @@ use log::{info, trace};
 
 use crate::User;
 
-pub struct Db(Arc<sled::Db>);
+pub struct UserDb(Arc<sled::Db>);
 
-impl Clone for Db {
+impl Clone for UserDb {
     fn clone(&self) -> Self {
-        Db(Arc::clone(&self.0))
+        UserDb(Arc::clone(&self.0))
     }
 }
 
-impl Db {
-    pub fn open(string: &str) -> Db {
+impl UserDb {
+    pub fn open(string: &str) -> UserDb {
         info!("Opening DB");
 
-        Db(Arc::new(
+        UserDb(Arc::new(
             sled::open(string).expect("the database to be available"),
         ))
     }
