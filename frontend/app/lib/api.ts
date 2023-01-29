@@ -5,6 +5,8 @@ import { alert, confirm } from '@nativescript/core/ui/dialogs'
 
 import Splash from "~/pages/Splash.svelte";
 
+const serverURL = "https://10.0.0.2:8080"
+
 export const stateList: String[] = ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","District of Columbia","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming"]
 export type State = typeof stateList[number];
 export type UserType = "Senior" | "Volunteer";
@@ -18,6 +20,13 @@ export type UserSignup = {
   address: FilledAddress,
   userType: UserType,
   password: String
+}
+export type UserData = {
+  username: string,
+  name: string,
+  address: string,
+  location: [number, number], // [lat, long]
+  user_type: { Volunteer: string[] } | { Senior: string | null }, // Volunteer contains a list of every request ID they've accepted, Senior contains the request ID of the request they've made
 }
 export type Address = {
   line1: String | undefined,
@@ -83,12 +92,21 @@ export type WorkRequestByIDResult = {
   address: String
 }
 
-export const invalidAddressAlert = () => alert({
+export const invalidAddressAlert = () => {
+  alert({
   title: "Invalid Address Input",
   message: "Missing Required Address Data"
-})
+  })
+  throw "Invalid Address"
+}
 
-// move to loginsignup page
+// move some of the following to the loginsignup page
+export const generateErrorDialog = (msg: string): void => {
+  alert({
+    title: "Error",
+    message: msg
+  });
+}
 export const concatAddress = async (address: FilledAddress) : Promise<String | void> => {
   return `${address.line1?.trim()}
 ${address.line2?.trim()}
@@ -124,23 +142,31 @@ const addressToLonLat = async (address: FilledAddress) : Promise<[Number, Number
     //   countrycodes: "us"
     // } as Record<symbol, String>)
   })
-  console.log(res.headers)
-  console.log(await res.json());
+  console.log(`https://nominatim.openstreetmap.org/search?addressdetails=1&q=${address.line1}, ${address.city}, ${address.state}&format=jsonv2&countrycodes=us&limit=1`)
   if (!res.ok) return LonLatRequestError.unknownError;
-  const lonLat = (await res.json())?.features?.geometry?.coordinates
-  if (typeof lonLat == undefined) return LonLatRequestError.unknownError;
+  const json = await res.json()
+  const queryData = json?.[0]
+  const lonLat = [queryData?.lat, queryData?.lon]
+  if (!lonLat[0] || !lonLat[1]) return LonLatRequestError.unknownError;
+  console.log(lonLat)
   return lonLat as [Number, Number];
 }
 
+// TODO: Implement
 const askUserToCheckIfAddressIsCorrect = () => {
   
 }
 
-const getAuthorizationString = () : String | void => {
+const getAuthorizationString = () : string => {
   const authorizationString = ApplicationSettings.getString("AuthorizationString")
+  const parsed = JSON.parse(authorizationString)
+  if (Date.now() > parsed.expirationTime) {
+    navigate({page: Splash})
+    throw "Authorization Token Expired"
+  }
   if (authorizationString == "") {
     navigate({page: Splash})
-    return
+    throw "No Authorization String Found"
   }
   return authorizationString
 }
@@ -149,7 +175,7 @@ export const createAccount = async (user: UserSignup) : Promise<LoginResult> => 
   const location = await addressToLonLat(user.address)
   const addressString = concatAddress(user.address)
   if (location == LonLatRequestError.unknownError) return LoginResult.addressError;
-  const res = await fetch("/api/create-account", {
+  const test = fetch(`${serverURL}/api/create-account`, {
     method: "POST",
     body: JSON.stringify({
       username: user.username, 
@@ -158,8 +184,13 @@ export const createAccount = async (user: UserSignup) : Promise<LoginResult> => 
       location,
       userType: user.userType,
       password: user.password
-    })
+    }),
+    redirect: "follow"
   })
+  console.log(test)
+  const res = await test
+  console.log(await res)
+  console.log(await res.text())
   if (res.status == 409) return LoginResult.usernameError;
   if (!res.ok) return LoginResult.unknownError;
   ApplicationSettings.setString("AuthorizationString", await res.text());
@@ -210,4 +241,23 @@ export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequ
   if (res.status == 405) return WorkRequestError.notVolunteer
   if (!res.ok) return WorkRequestError.unknownError
   return res.json();
+}
+export const getUserData = async (): Promise<UserData> => {
+  const res = await fetch("/api/user-data", {
+    method: "POST",
+    body: JSON.stringify({authorization: getAuthorizationString()})
+  })
+  if (!res.ok) throw "User data not found";
+  return res.json()
+}
+
+export const testServer = async () => {
+  // console.log(await fetch(serverURL+"/api/create-account"))
+  console.log("BRUH");
+  console.log(await (await fetch("http://asdf.com",{
+    referrerPolicy: 'origin',
+    cache: 'no-cache',
+    mode: 'cors',
+  })).status)
+  console.log("YAY?")
 }

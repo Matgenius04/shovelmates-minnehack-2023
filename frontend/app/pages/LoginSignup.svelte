@@ -1,48 +1,67 @@
 <script lang="ts">
     import { PropertyChangeData } from "@nativescript/core";
   import { navigate } from "svelte-native";
+    import { generateErrorDialog, getUserData, invalidAddressAlert, testServer } from "~/lib/api";
   import {
     Address,
     stateList,
     UserType,
     login,
     createAccount,
-    concatAddress,
+    LoginResult,
     checkIfAddressFilledIn
   } from "~/lib/api.ts";
+    import Senior from "./Senior.svelte";
 
   import Splash from "./Splash.svelte";
+    import Volunteer from "./Volunteer.svelte";
 
   export let isLogin: boolean;
   let headerText: String = isLogin ? "Login" : "Signup";
 
-  let username: String,
-    password: String,
-    name: String,
+  let username: String = "Username",
+    password: String = "Password",
+    name: String = "Full Name",
     address: Address = {
-      line1: undefined,
+      line1: "511 Kenwood Pkwy",
       line2: undefined,
-      city: undefined,
-      country: undefined,
-      zip: undefined,
+      city: "Minneapolis",
+      state: "Minnesota",
+      zip: "55403",
     },
     userType: UserType
   const userTypeOptions = ["Senior", "Volunteer"]
 
-  const loginOrSignup = () => {
+  const loginOrSignup = async () => {
+    await testServer();
     if (isLogin) {
-      login({
+      const res: LoginResult = await login({
         username,
         password,
       });
+      if (res == LoginResult.addressError) return invalidAddressAlert()
+      if (res == LoginResult.usernameError) return generateErrorDialog("Username Not Found")
+      if (res == LoginResult.passwordError) return generateErrorDialog("Password Incorrect")
+      if (res == LoginResult.unknownError) return generateErrorDialog("Unknown Error. Please Try Again Later.")
+      const userData = await getUserData();
+      if (Object.keys(userData.user_type)[0] == "Volunteer") navigate({page: Volunteer})
+      if (Object.keys(userData.user_type)[0] == "Senior") navigate({page: Senior})
     } else {
-      createAccount({
+      const res: LoginResult = await createAccount({
         username,
         name,
         address: checkIfAddressFilledIn(address),
         userType,
         password
       });
+      console.log(res)
+      if (res == LoginResult.addressError) return invalidAddressAlert()
+      if (res == LoginResult.usernameError) return generateErrorDialog("Username Already Exists")
+      if (res == LoginResult.passwordError) return generateErrorDialog("Something Went Very Wrong")
+      if (res == LoginResult.unknownError) return generateErrorDialog("Unknown Error. Please Try Again Later.")
+      const userData = await getUserData();
+      if (Object.keys(userData.user_type)[0] == "Volunteer") navigate({page: Volunteer})
+      if (Object.keys(userData.user_type)[0] == "Senior") navigate({page: Senior})
     }
   };
 </script>
@@ -97,7 +116,7 @@
                 items={stateList}
                 bind:selectedValue = {address.state}
                 verticalAlignment = "stretch"
-                selectedIndex = 0
+                selectedIndex = 23
               />
             </stackLayout>
           </flexboxLayout>
@@ -109,7 +128,7 @@
         <stackLayout>
           <!-- Change text here to be less ew -->
           <label text="User Type" />
-          <listPicker items={userTypeOptions} bind:selectedValue={userType} verticalAlignment = "stretch"></listPicker>
+          <listPicker items={userTypeOptions} bind:selectedValue={userType} verticalAlignment="stretch"></listPicker>
         </stackLayout>
       {/if}
       <button text="Submit" on:tap={loginOrSignup} />
