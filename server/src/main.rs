@@ -107,12 +107,12 @@ async fn main() {
 
     info!("Serving");
 
-    let http = warp::serve(routes.to_owned()).run(([0, 0, 0, 0], 8080));
-    let https = warp::serve(routes)
-        .tls()
-        .cert(include_bytes!("../../self-signed-bs/certificate.pem"))
-        .key(include_bytes!("../../self-signed-bs/key.pem"))
-        .run(([0, 0, 0, 0], 8079));
-
-    join!(http, https);
+    let http = warp::serve(routes.to_owned())
+        .run(([0, 0, 0, 0], 8080))
+        .await;
+    // let https = warp::serve(routes)
+    //     .tls()
+    //     .cert(include_bytes!("../../self-signed-bs/certificate.pem"))
+    //     .key(include_bytes!("../../self-signed-bs/key.pem"))
+    //     .run(([0, 0, 0, 0], 8079));
 }

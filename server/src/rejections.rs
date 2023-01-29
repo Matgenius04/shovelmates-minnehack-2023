@@ -1,4 +1,4 @@
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 
 use warp::{
     body::BodyDeserializeError,
@@ -85,7 +85,8 @@ impl CustomRejection {
 impl reject::Reject for CustomRejection {}
 
 pub async fn handle_rejection(rejection: Rejection) -> Result<impl Reply, Rejection> {
-    if rejection.find::<BodyDeserializeError>().is_some() {
+    if let Some(e) = rejection.find::<BodyDeserializeError>() {
+        debug!("Body deserialze error: {e}");
         return Response::builder()
             .status(400)
             .body("Error deserializing body".to_owned())

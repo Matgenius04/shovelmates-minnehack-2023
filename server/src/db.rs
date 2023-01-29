@@ -2,6 +2,7 @@ use std::{any::type_name, marker::PhantomData, sync::Arc};
 
 use log::{info, trace};
 use serde::{de::DeserializeOwned, Serialize};
+use sled::transaction::{ConflictableTransactionError, TransactionError};
 
 pub struct Db<T: Serialize + DeserializeOwned>(Arc<sled::Db>, PhantomData<T>);
 
@@ -62,5 +63,32 @@ impl<T: Serialize + DeserializeOwned> Db<T> {
 
             Ok((str, t))
         })
+    }
+
+    pub fn update(&self, key: &str, f: impl Fn(&mut T) -> ()) -> Result<(), anyhow::Error> {
+        if let Err(e) = self.0.transaction(|tree| {
+            let mut v = match tree.get(key)? {
+                Some(v) => serde_json::from_slice(&v)
+                    .map_err(|e| ConflictableTransactionError::<anyhow::Error>::Abort(e.into()))?,
+                None => return Ok(()),
+            };
+
+            f(&mut v);
+
+            tree.insert(
+                key,
+                serde_json::to_vec(&v)
+                    .map_err(|e| ConflictableTransactionError::Abort(e.into()))?,
+            )?;
+
+            Ok(())
+        }) {
+            match e {
+                TransactionError::Abort(e) => return Err(e),
+                TransactionError::Storage(e) => return Err(e.into()),
+            }
+        };
+
+        Ok(())
     }
 }

@@ -5,7 +5,7 @@ use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
     authorization::authorize, db::Db, distance_meters, rejections::CustomRejection, HelpRequest,
-    User, UserType,
+    HelpRequestState, User, UserType,
 };
 
 fn volunteering_initial_validation(
@@ -64,6 +64,21 @@ pub fn volunteering_filters(
             }
         });
 
+    let accept_request_requests_db = help_requests.to_owned();
+    let accept_request_user_db = user_db.to_owned();
+    let accept_request = warp::path!("api" / "get-request")
+        .and(volunteering_initial_validation(user_db))
+        .and(warp::filters::body::json::<GetRequestData>())
+        .and_then(move |username, user, get_request_data: GetRequestData| {
+            debug!("{username} is getting a request");
+            let requests_db = accept_request_requests_db.to_owned();
+            let user_db = accept_request_user_db.to_owned();
+            async move {
+                accept_request(username, user, get_request_data.id, &user_db, &requests_db)
+                    .map_err(reject::custom)
+            }
+        });
+
     let accepted_requests = warp::path!("api" / "accepted-requests")
         .and(volunteering_initial_validation(user_db))
         .and_then(move |username, user| {
@@ -76,6 +91,8 @@ pub fn volunteering_filters(
             .or(get_request)
             .unify()
             .or(accepted_requests)
+            .unify()
+            .or(accept_request)
             .unify(),
     )
 }
@@ -151,6 +168,35 @@ fn get_request(
             .status(409)
             .body("That request doesn't exist".to_string())?,
     })
+}
+
+fn accept_request(
+    username: String,
+    mut user: User,
+    id: String,
+    user_db: &Db<User>,
+    help_requests: &Db<HelpRequest>,
+) -> Result<Response<String>, CustomRejection> {
+    let mut accepted = match user.user_type {
+        UserType::Volunteer(accepted) => accepted,
+        _ => {
+            return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+                "The user isn't a volunteer, this case should've been filtered earlier",
+            )))
+        }
+    };
+
+    help_requests.update(&id, move |t| {
+        t.state = HelpRequestState::AcceptedBy(username.to_owned());
+    })?;
+
+    accepted.push(id);
+
+    user.user_type = UserType::Volunteer(accepted);
+
+    user_db.add(&user.username, &user)?;
+
+    Ok(Response::builder().status(200).body(String::new())?)
 }
 
 fn accepted_requests(user: User) -> Result<Response<String>, CustomRejection> {
