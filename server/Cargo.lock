@@ -1034,6 +1034,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "sled",
+ "thiserror",
  "tokio",
  "warp",
 ]
