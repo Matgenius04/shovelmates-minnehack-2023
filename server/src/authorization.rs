@@ -5,6 +5,9 @@ use once_cell::sync::Lazy;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
+use warp::{reject, Filter, Rejection};
+
+use crate::rejections::CustomRejection;
 
 static TOKEN_KEY: Lazy<Secret<[u8; 32]>> = Lazy::new(|| Secret::new(rand::random()));
 
@@ -73,4 +76,19 @@ pub fn hash_password(password: &Secret<String>, salt: [u8; 32]) -> Vec<u8> {
     hasher.update(password.expose_secret());
 
     hasher.finalize().to_vec()
+}
+
+#[derive(Deserialize)]
+struct AuthorizationPart {
+    authorization: Secret<String>,
+}
+
+pub fn authorize() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
+    warp::filters::body::json::<AuthorizationPart>().and_then(
+        |auth: AuthorizationPart| async move {
+            get_username_from_token_if_valid(&auth.authorization)
+                .ok_or_else(|| reject::custom(CustomRejection::InvalidToken))
+                .map(|v| v.to_owned())
+        },
+    )
 }

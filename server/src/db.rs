@@ -1,45 +1,54 @@
-use std::sync::Arc;
+use std::{any::type_name, fmt::Debug, marker::PhantomData, sync::Arc};
 
 use log::{info, trace};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::User;
 
-pub struct UserDb(Arc<sled::Db>);
+pub struct Db<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned>(
+    Arc<sled::Db>,
+    PhantomData<K>,
+    PhantomData<T>,
+);
 
-impl Clone for UserDb {
+impl<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned> Clone for Db<K, T> {
     fn clone(&self) -> Self {
-        UserDb(Arc::clone(&self.0))
+        Db(Arc::clone(&self.0), PhantomData, PhantomData)
     }
 }
 
-impl UserDb {
-    pub fn open(string: &str) -> UserDb {
-        info!("Opening DB");
+impl<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned> Db<K, T> {
+    pub fn open(string: &str) -> Db<K, T> {
+        info!("Opening {} DB from {string}", type_name::<T>());
 
-        UserDb(Arc::new(
-            sled::open(string).expect("the database to be available"),
-        ))
+        Db(
+            Arc::new(sled::open(string).expect("the database to be available")),
+            PhantomData,
+            PhantomData,
+        )
     }
 
-    pub fn contains(&self, username: &str) -> Result<bool, anyhow::Error> {
-        trace!("Checking if {username} exists");
+    pub fn contains(&self, key: &K) -> Result<bool, anyhow::Error> {
+        trace!(
+            "Checking if {key:?} exists in {} database",
+            type_name::<T>()
+        );
 
-        Ok(self.0.contains_key(username.as_bytes())?)
+        Ok(self.0.contains_key(key)?)
     }
 
-    pub fn add(&self, user: &User) -> Result<(), anyhow::Error> {
-        trace!("Adding user `{}` to the database", &user.username);
+    pub fn add(&self, key: &K, val: &T) -> Result<(), anyhow::Error> {
+        trace!("Adding `{key:?}` to the {} database", type_name::<T>());
 
-        self.0
-            .insert(user.username.as_bytes(), serde_json::to_vec(user)?)?;
+        self.0.insert(key, serde_json::to_vec(val)?)?;
 
         Ok(())
     }
 
-    pub fn get(&self, username: &str) -> Result<Option<User>, anyhow::Error> {
-        trace!("Getting user `{username}` from the database");
+    pub fn get(&self, key: &K) -> Result<Option<User>, anyhow::Error> {
+        trace!("Getting `{key:?}` from the {} database", type_name::<T>());
 
-        match self.0.get(username.as_bytes())? {
+        match self.0.get(key)? {
             Some(v) => Ok(serde_json::from_slice(&v)?),
             None => Ok(None),
         }
