@@ -23,6 +23,7 @@
     <label text="Shovelmates" fontSize="25"></label>
   </actionBar>
   <flexboxLayout justifyContent="space-around" flexDirection="column">
+    <image src="~/assets/logo.png" width="80%" height="30%" stretch="aspectFit" alignSelf="center"></image>
     <button on:tap={navToLogin}>Login</button>
     <button on:tap={navToSignup}>Signup</button>
   </flexboxLayout>

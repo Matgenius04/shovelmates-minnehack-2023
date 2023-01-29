@@ -1,7 +1,10 @@
 <script lang="ts">
-    import { PropertyChangeData } from "@nativescript/core";
   import { navigate } from "svelte-native";
-    import { generateErrorDialog, getUserData, invalidAddressAlert, testServer } from "~/lib/api";
+  import {
+    generateErrorDialog,
+    getUserData,
+    invalidAddressAlert,
+  } from "~/lib/api";
   import {
     Address,
     stateList,
@@ -9,12 +12,12 @@
     login,
     createAccount,
     LoginResult,
-    checkIfAddressFilledIn
+    checkIfAddressFilledIn,
   } from "~/lib/api.ts";
-    import Senior from "./Senior.svelte";
+  import Senior from "./Senior.svelte";
 
   import Splash from "./Splash.svelte";
-    import Volunteer from "./Volunteer.svelte";
+  import Volunteer from "./Volunteer.svelte";
 
   export let isLogin: boolean;
   let headerText: String = isLogin ? "Login" : "Signup";
@@ -29,39 +32,47 @@
       state: "Minnesota",
       zip: "55403",
     },
-    userType: UserType
-  const userTypeOptions = ["Senior", "Volunteer"]
+    userType: UserType = "Senior";
+  let volunteerButton,
+    seniorButton;
+  const userTypeOptions = ["Senior", "Volunteer"];
 
   const loginOrSignup = async () => {
-    await testServer();
     if (isLogin) {
       const res: LoginResult = await login({
         username,
         password,
       });
-      if (res == LoginResult.addressError) return invalidAddressAlert()
-      if (res == LoginResult.usernameError) return generateErrorDialog("Username Not Found")
-      if (res == LoginResult.passwordError) return generateErrorDialog("Password Incorrect")
-      if (res == LoginResult.unknownError) return generateErrorDialog("Unknown Error. Please Try Again Later.")
-      const userData = await getUserData();
-      if (Object.keys(userData.user_type)[0] == "Volunteer") navigate({page: Volunteer})
-      if (Object.keys(userData.user_type)[0] == "Senior") navigate({page: Senior})
+      if (res == LoginResult.addressError) return invalidAddressAlert();
+      if (res == LoginResult.usernameError)
+        return generateErrorDialog("Username Not Found");
+      if (res == LoginResult.passwordError)
+        return generateErrorDialog("Password Incorrect");
+      if (res == LoginResult.unknownError)
+        return generateErrorDialog("Unknown Error. Please Try Again Later.");
+      // const userData = await getUserData();
+      if (userType == "Volunteer") return navigate({ page: Volunteer });
+      if (userType == "Senior") return navigate({ page: Senior });
     } else {
       const res: LoginResult = await createAccount({
         username,
         name,
         address: checkIfAddressFilledIn(address),
         userType,
-        password
+        password,
       });
-      console.log(res)
-      if (res == LoginResult.addressError) return invalidAddressAlert()
-      if (res == LoginResult.usernameError) return generateErrorDialog("Username Already Exists")
-      if (res == LoginResult.passwordError) return generateErrorDialog("Something Went Very Wrong")
-      if (res == LoginResult.unknownError) return generateErrorDialog("Unknown Error. Please Try Again Later.")
-      const userData = await getUserData();
-      if (Object.keys(userData.user_type)[0] == "Volunteer") navigate({page: Volunteer})
-      if (Object.keys(userData.user_type)[0] == "Senior") navigate({page: Senior})
+      console.log(res);
+      if (res == LoginResult.addressError) return invalidAddressAlert();
+      if (res == LoginResult.usernameError)
+        return generateErrorDialog("Username Already Exists");
+      if (res == LoginResult.passwordError)
+        return generateErrorDialog("Something Went Very Wrong");
+      if (res == LoginResult.unknownError)
+        return generateErrorDialog("Unknown Error. Please Try Again Later.");
+      // const userData = await getUserData();
+      console.log(userType);
+      if (userType == "Volunteer") return navigate({ page: Volunteer });
+      if (userType == "Senior") return navigate({ page: Senior });
     }
   };
 </script>
@@ -99,11 +110,17 @@
         <flexboxLayout flexDirection="column">
           <stackLayout>
             <label text="Address Line 1" />
-            <textField bind:text={address.line1} hint="House Number & Street Address"/>
+            <textField
+              bind:text={address.line1}
+              hint="House Number & Street Address"
+            />
           </stackLayout>
           <stackLayout>
             <label text="Address Line 2 (Optional)" />
-            <textField bind:text={address.line2} hint="Apartment, Suite, Unit, Building, Floor"/>
+            <textField
+              bind:text={address.line2}
+              hint="Apartment, Suite, Unit, Building, Floor"
+            />
           </stackLayout>
           <flexboxLayout flexDirection="row" justifyContent="space-around">
             <stackLayout orientation="horizontal">
@@ -114,9 +131,9 @@
               <label text="State" />
               <listPicker
                 items={stateList}
-                bind:selectedValue = {address.state}
-                verticalAlignment = "stretch"
-                selectedIndex = 23
+                bind:selectedValue={address.state}
+                verticalAlignment="stretch"
+                selectedIndex="23"
               />
             </stackLayout>
           </flexboxLayout>
@@ -128,7 +145,15 @@
         <stackLayout>
           <!-- Change text here to be less ew -->
           <label text="User Type" />
-          <listPicker items={userTypeOptions} bind:selectedValue={userType} verticalAlignment="stretch"></listPicker>
+          <flexboxLayout>
+            <button text="Senior" bind:this={seniorButton} on:tap={() => {userType = "Senior"}}></button>
+            <button text="Volunteer" bind:this={volunteerButton} on:tap={() => {userType = "Volunteer"}}></button>
+          </flexboxLayout>
+          <!-- <listPicker
+            items={userTypeOptions}
+            bind:selectedValue={userType}
+            verticalAlignment="stretch"
+          /> -->
         </stackLayout>
       {/if}
       <button text="Submit" on:tap={loginOrSignup} />
