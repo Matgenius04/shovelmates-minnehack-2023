@@ -86,6 +86,19 @@ pub fn volunteering_filters(
             async move { accepted_requests(user).map_err(reject::custom) }
         });
 
+    let accept_request_requests_db = help_requests.to_owned();
+    let marking_completed = warp::path!("api" / "mark-request-completed")
+        .and(volunteering_initial_validation(user_db))
+        .and(warp::filters::body::json::<GetRequestData>())
+        .and_then(move |username, _, get_request_data: GetRequestData| {
+            debug!("{username} is marking a request as completed");
+            let requests_db = accept_request_requests_db.to_owned();
+            async move {
+                marking_as_completed(username, get_request_data.id, &requests_db)
+                    .map_err(reject::custom)
+            }
+        });
+
     warp::post().and(
         request_work
             .or(get_request)
@@ -93,6 +106,8 @@ pub fn volunteering_filters(
             .or(accepted_requests)
             .unify()
             .or(accept_request)
+            .unify()
+            .or(marking_completed)
             .unify(),
     )
 }
@@ -208,4 +223,31 @@ fn accepted_requests(user: User) -> Result<Response<String>, CustomRejection> {
             "The user isn't a volunteer, this case should've been filtered earlier",
         ))),
     }
+}
+
+fn marking_as_completed(
+    username: String,
+    id: String,
+    help_requests: &Db<HelpRequest>,
+) -> Result<Response<String>, CustomRejection> {
+    Ok(
+        match help_requests.update(&id, |request| {
+            if let HelpRequestState::AcceptedBy(accepted_by) = &request.state {
+                if &username == accepted_by {
+                    request.state = HelpRequestState::MarkedCompletedBy(username.to_owned());
+
+                    return Response::builder().status(200).body(String::new());
+                }
+            }
+
+            return Response::builder()
+                .status(409)
+                .body("The id wasn't accepted by the user".to_owned());
+        })? {
+            Some(v) => v?,
+            None => Response::builder()
+                .status(409)
+                .body("The id doesn't exist".to_owned())?,
+        },
+    )
 }

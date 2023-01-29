@@ -86,7 +86,7 @@ impl reject::Reject for CustomRejection {}
 
 pub async fn handle_rejection(rejection: Rejection) -> Result<impl Reply, Rejection> {
     if let Some(e) = rejection.find::<BodyDeserializeError>() {
-        debug!("Body deserialze error: {e}");
+        debug!("Body deserialize error: {e}");
         return Response::builder()
             .status(400)
             .body("Error deserializing body".to_owned())

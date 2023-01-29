@@ -55,6 +55,8 @@ impl<T: Serialize + DeserializeOwned> Db<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Result<(String, T), anyhow::Error>> {
+        trace!("Iterating the {} database", type_name::<T>());
+
         self.0.iter().map(|maybe_v| {
             let (key, val) = maybe_v?;
 
@@ -65,30 +67,35 @@ impl<T: Serialize + DeserializeOwned> Db<T> {
         })
     }
 
-    pub fn update(&self, key: &str, f: impl Fn(&mut T) -> ()) -> Result<(), anyhow::Error> {
-        if let Err(e) = self.0.transaction(|tree| {
-            let mut v = match tree.get(key)? {
-                Some(v) => serde_json::from_slice(&v)
-                    .map_err(|e| ConflictableTransactionError::<anyhow::Error>::Abort(e.into()))?,
-                None => return Ok(()),
-            };
+    pub fn update<A>(
+        &self,
+        key: &str,
+        f: impl Fn(&mut T) -> A,
+    ) -> Result<Option<A>, anyhow::Error> {
+        trace!("Updating {key} in the {} database", type_name::<T>());
 
-            f(&mut v);
+        self.0
+            .transaction(|tree| {
+                let mut v = match tree.get(key)? {
+                    Some(v) => serde_json::from_slice(&v).map_err(|e| {
+                        ConflictableTransactionError::<anyhow::Error>::Abort(e.into())
+                    })?,
+                    None => return Ok(None),
+                };
 
-            tree.insert(
-                key,
-                serde_json::to_vec(&v)
-                    .map_err(|e| ConflictableTransactionError::Abort(e.into()))?,
-            )?;
+                let a = f(&mut v);
 
-            Ok(())
-        }) {
-            match e {
-                TransactionError::Abort(e) => return Err(e),
-                TransactionError::Storage(e) => return Err(e.into()),
-            }
-        };
+                tree.insert(
+                    key,
+                    serde_json::to_vec(&v)
+                        .map_err(|e| ConflictableTransactionError::Abort(e.into()))?,
+                )?;
 
-        Ok(())
+                Ok(Some(a))
+            })
+            .map_err(|e| match e {
+                TransactionError::Abort(e) => e,
+                TransactionError::Storage(e) => e.into(),
+            })
     }
 }

@@ -9,7 +9,6 @@ use db::Db;
 use geo::algorithm::geodesic_distance::GeodesicDistance;
 use log::info;
 use serde::{Deserialize, Serialize};
-use tokio::join;
 use warp::Filter;
 
 use crate::{
@@ -107,7 +106,7 @@ async fn main() {
 
     info!("Serving");
 
-    let http = warp::serve(routes.to_owned())
+    warp::serve(routes.to_owned())
         .run(([0, 0, 0, 0], 8080))
         .await;
     // let https = warp::serve(routes)
