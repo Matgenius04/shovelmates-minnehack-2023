@@ -1,10 +1,11 @@
 use log::{debug, info};
 use secrecy::Secret;
 use serde::Deserialize;
+use serde_json::json;
 use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
-    authorization::{create_token, hash_password},
+    authorization::{authorize, create_token, hash_password},
     db::Db,
     rejections::CustomRejection,
     User, UserType,
@@ -51,7 +52,16 @@ pub fn accounts_filters(
             async move { login(&db, login_info).map_err(reject::custom) }
         });
 
-    warp::post().and(create_account.or(login).unify())
+    let account_info_db = db.to_owned();
+    let account_info =
+        warp::path!("api" / "user-data")
+            .and(authorize())
+            .and_then(move |username| {
+                let db = account_info_db.to_owned();
+                async move { get_account_info(username, &db).map_err(reject::custom) }
+            });
+
+    warp::post().and(create_account.or(login).unify().or(account_info).unify())
 }
 
 fn create_account(
@@ -117,4 +127,30 @@ fn login(db: &Db<str, User>, login_info: LoginInfo) -> Result<Response<String>, 
     Ok(Response::builder()
         .status(200)
         .body(create_token(&login_info.username)?)?)
+}
+
+fn get_account_info(
+    username: String,
+    db: &Db<str, User>,
+) -> Result<Response<String>, CustomRejection> {
+    let user = match db.get(&username)? {
+        Some(v) => v,
+        None => {
+            return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+                "The username doesn't exist in the database",
+            )))
+        }
+    };
+
+    info!("{username} requested their user data");
+
+    Ok(Response::builder()
+        .status(200)
+        .body(serde_json::to_string(&json!({
+            "username": user.username,
+            "name": user.name,
+            "address": user.address,
+            "location": user.location,
+            "user_type": user.user_type
+        }))?)?)
 }

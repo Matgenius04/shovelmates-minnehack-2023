@@ -3,6 +3,7 @@ mod authorization;
 mod db;
 mod help_requests;
 mod rejections;
+mod volunteering;
 
 use db::Db;
 use log::info;
@@ -15,8 +16,8 @@ use crate::{
 
 #[derive(Serialize, Deserialize, Clone)]
 enum UserType {
-    Volunteer(Vec<[u8; 32]>),
-    Senior(Option<[u8; 32]>),
+    Volunteer(Vec<String>),
+    Senior(Option<String>),
 }
 
 #[derive(Clone, Serialize, Deserialize)]

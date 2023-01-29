@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE;
+use base64::Engine;
 use chrono::Utc;
 use log::{debug, info, trace};
 use serde::Deserialize;
@@ -37,7 +39,7 @@ fn help_requests_initial_validation(
 
 pub fn help_requests_filters(
     user_db: &Db<str, User>,
-    help_requests: &Db<[u8; 32], HelpRequest>,
+    help_requests: &Db<str, HelpRequest>,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let request_help_requests_db = help_requests.to_owned();
     let request_help_users_db = user_db.to_owned();
@@ -95,7 +97,7 @@ struct RequestHelpInfo {
 fn request_help(
     mut user: User,
     request_help_info: RequestHelpInfo,
-    help_requests: &Db<[u8; 32], HelpRequest>,
+    help_requests: &Db<str, HelpRequest>,
     users: &Db<str, User>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(_)) = &user.user_type {
@@ -113,7 +115,7 @@ fn request_help(
     let mut id;
 
     loop {
-        id = rand::random();
+        id = URL_SAFE.encode(rand::random::<[u8; 32]>());
 
         if !help_requests.contains(&id)? {
             break;
@@ -139,7 +141,7 @@ fn request_help(
 
 fn get_help_request(
     user: User,
-    help_requests: &Db<[u8; 32], HelpRequest>,
+    help_requests: &Db<str, HelpRequest>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(id)) = user.user_type {
         let help_request = match help_requests.get(&id)? {
@@ -170,7 +172,7 @@ fn get_help_request(
 fn delete_help_request(
     mut user: User,
     user_db: &Db<str, User>,
-    help_requests: &Db<[u8; 32], HelpRequest>,
+    help_requests: &Db<str, HelpRequest>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(id)) = user.user_type {
         if help_requests.delete(&id)?.is_none() {
