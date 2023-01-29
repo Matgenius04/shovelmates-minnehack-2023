@@ -5,7 +5,7 @@ use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
     authorization::{create_token, hash_password},
-    db::UserDb,
+    db::Db,
     rejections::CustomRejection,
     User, UserType,
 };
@@ -27,7 +27,7 @@ struct LoginInfo {
 }
 
 pub fn accounts_filters(
-    db: &UserDb,
+    db: &Db<User>,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
@@ -49,7 +49,7 @@ pub fn accounts_filters(
 }
 
 fn create_account(
-    db: &UserDb,
+    db: &Db<User>,
     create_account_info: CreateAccountInfo,
 ) -> Result<Response<String>, CustomRejection> {
     trace!(
@@ -77,7 +77,7 @@ fn create_account(
         password_hash,
     };
 
-    db.add(&user)?;
+    db.add(&user.name, &user)?;
 
     info!(
         "Created a new account for {}",
@@ -89,7 +89,7 @@ fn create_account(
         .body(create_token(&create_account_info.username)?)?)
 }
 
-fn login(db: &UserDb, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
+fn login(db: &Db<User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
     trace!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {

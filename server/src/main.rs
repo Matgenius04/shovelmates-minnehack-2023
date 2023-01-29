@@ -3,13 +3,10 @@ mod authorization;
 mod db;
 mod rejections;
 
-use authorization::{create_token, hash_password};
-use db::UserDb;
-use log::{info, trace};
-use rejections::CustomRejection;
-use secrecy::Secret;
+use db::Db;
+use log::info;
 use serde::{Deserialize, Serialize};
-use warp::{hyper::Response, reject, Filter};
+use warp::Filter;
 
 use crate::{accounts::accounts_filters, rejections::handle_rejection};
 
@@ -34,7 +31,7 @@ pub struct User {
 async fn main() {
     pretty_env_logger::init();
 
-    let db = UserDb::open("users");
+    let db = Db::open("users");
 
     let accounts = accounts_filters(&db);
 
