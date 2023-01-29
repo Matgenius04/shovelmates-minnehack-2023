@@ -1,40 +1,58 @@
 use log::{error, info, trace, warn};
-use thiserror::Error;
+
 use warp::{
     body::BodyDeserializeError,
-    http,
     hyper::{Response, StatusCode},
     reject, Rejection, Reply,
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum CustomRejection {
-    #[error("Failed to create a response: {0}")]
-    ResponseCreationError(#[from] http::Error),
-    #[error("The authentication string was invalid")]
     InvalidToken,
-    #[error("The username `{0}` already exists")]
     UsernameAlreadyExists(String),
-    #[error("The username `{0}` doesn't exist")]
     UsernameDoesntExist(String),
-    #[error("The password for `{0}` is incorrect")]
     IncorrectPassword(String),
-    #[error("You must have a Senior account to invoke help request endpoints")]
     NotSenior,
-    #[error("You must have a Volunteer account to invoke help request endpoints")]
     NotVolunteer,
-    #[error("You already requested help")]
     AlreadyRequestedHelp,
-    #[error("Unexpected server error: {0}")]
-    Anyhow(#[from] anyhow::Error),
+    DidntRequestHelp,
+    Anyhow(anyhow::Error),
+}
+
+impl<T> From<T> for CustomRejection
+where
+    anyhow::Error: From<T>,
+{
+    fn from(val: T) -> CustomRejection {
+        CustomRejection::Anyhow(anyhow::Error::from(val))
+    }
 }
 
 impl CustomRejection {
+    fn description(&self) -> String {
+        use CustomRejection::*;
+
+        match self {
+            InvalidToken => "The authentication string was invalid".to_owned(),
+            UsernameAlreadyExists(username) => format!("The username `{username}` already exists"),
+            UsernameDoesntExist(username) => format!("The username `{username}` doesn't exist"),
+            IncorrectPassword(username) => format!("The password for `{username} is incorrect`"),
+            NotSenior => {
+                "You must have a Senior account to invoke help request endpoints".to_owned()
+            }
+            NotVolunteer => {
+                "You must have a Volunteer account to invoke volunteering endpoints".to_owned()
+            }
+            AlreadyRequestedHelp => "You already requested help".to_owned(),
+            DidntRequestHelp => "You never requested help".to_owned(),
+            Anyhow(e) => format!("Unexpected server error: {e}"),
+        }
+    }
+
     fn status(&self) -> StatusCode {
         use CustomRejection::*;
 
         match self {
-            ResponseCreationError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             InvalidToken => StatusCode::FORBIDDEN,
             UsernameAlreadyExists(_) => StatusCode::CONFLICT,
             UsernameDoesntExist(_) => StatusCode::CONFLICT,
@@ -42,6 +60,7 @@ impl CustomRejection {
             NotSenior => StatusCode::METHOD_NOT_ALLOWED,
             NotVolunteer => StatusCode::METHOD_NOT_ALLOWED,
             AlreadyRequestedHelp => StatusCode::CONFLICT,
+            DidntRequestHelp => StatusCode::CONFLICT,
             Anyhow(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -50,11 +69,14 @@ impl CustomRejection {
         use CustomRejection::*;
 
         match self {
-            ResponseCreationError(_) | Anyhow(_) => error!("{}", self.to_string()),
-            InvalidToken | IncorrectPassword(_) => warn!("{}", self.to_string()),
-            NotSenior | NotVolunteer => info!("{}", self.to_string()),
-            UsernameAlreadyExists(_) | UsernameDoesntExist(_) | AlreadyRequestedHelp => {
-                trace!("{}", self.to_string())
+            Anyhow(_) => error!("{}", self.description()),
+            InvalidToken | IncorrectPassword(_) => warn!("{}", self.description()),
+            NotSenior | NotVolunteer => info!("{}", self.description()),
+            UsernameAlreadyExists(_)
+            | UsernameDoesntExist(_)
+            | AlreadyRequestedHelp
+            | DidntRequestHelp => {
+                trace!("{}", self.description())
             }
         }
     }
@@ -71,15 +93,12 @@ pub async fn handle_rejection(rejection: Rejection) -> Result<impl Reply, Reject
     }
 
     if let Some(custom_rejection) = rejection.find::<CustomRejection>() {
-        use CustomRejection::*;
-
         custom_rejection.log();
 
         return Ok(match custom_rejection {
-            ResponseCreationError(_) => return Err(rejection),
             e => Response::builder()
                 .status(e.status())
-                .body(e.to_string())
+                .body(e.description())
                 .map_err(|e| reject::custom(CustomRejection::from(e)))?,
         });
     }

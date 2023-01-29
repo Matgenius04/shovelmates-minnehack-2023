@@ -3,8 +3,6 @@ use std::{any::type_name, fmt::Debug, marker::PhantomData, sync::Arc};
 use log::{info, trace};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::User;
-
 pub struct Db<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned>(
     Arc<sled::Db>,
     PhantomData<K>,
@@ -45,7 +43,7 @@ impl<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned> Db<K, T> 
         Ok(())
     }
 
-    pub fn get(&self, key: &K) -> Result<Option<User>, anyhow::Error> {
+    pub fn get(&self, key: &K) -> Result<Option<T>, anyhow::Error> {
         trace!("Getting `{key:?}` from the {} database", type_name::<T>());
 
         match self.0.get(key)? {
