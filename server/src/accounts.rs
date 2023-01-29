@@ -1,4 +1,4 @@
-use log::{info, trace};
+use log::{debug, info};
 use secrecy::Secret;
 use serde::Deserialize;
 use warp::{hyper::Response, reject, Filter, Rejection};
@@ -58,7 +58,7 @@ fn create_account(
     db: &Db<str, User>,
     create_account_info: CreateAccountInfo,
 ) -> Result<Response<String>, CustomRejection> {
-    trace!(
+    debug!(
         "Attempting to create an account for {}",
         &create_account_info.username
     );
@@ -99,7 +99,7 @@ fn create_account(
 }
 
 fn login(db: &Db<str, User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
-    trace!("Login attempt for {}", &login_info.username);
+    debug!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
         Some(user) => user,

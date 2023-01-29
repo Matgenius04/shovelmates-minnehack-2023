@@ -1,4 +1,5 @@
 use chrono::Utc;
+use log::{debug, info, trace};
 use serde::Deserialize;
 use serde_json::json;
 use warp::{hyper::Response, reject, Filter, Rejection};
@@ -11,6 +12,8 @@ use crate::{
 fn help_requests_initial_validation(
     user_db: &Db<str, User>,
 ) -> impl Filter<Extract = (String, User), Error = Rejection> + Clone {
+    trace!("Validating request for a help requests endpoint");
+
     let invoker_getter_db = user_db.to_owned();
 
     authorize()
@@ -41,7 +44,8 @@ pub fn help_requests_filters(
     let request_help = warp::path!("api" / "request-help")
         .and(help_requests_initial_validation(user_db))
         .and(warp::body::json::<RequestHelpInfo>())
-        .and_then(move |_, user, request_help_info| {
+        .and_then(move |username, user, request_help_info| {
+            debug!("`{username}` hit request-help endpoint");
             let requests_db = request_help_requests_db.to_owned();
             let users_db = request_help_users_db.to_owned();
             async move {
@@ -53,7 +57,8 @@ pub fn help_requests_filters(
     let get_request_requests_db = help_requests.to_owned();
     let get_requests = warp::path!("api" / "help-requests")
         .and(help_requests_initial_validation(user_db))
-        .and_then(move |_, user| {
+        .and_then(move |username, user| {
+            debug!("`{username}` hit help-requests endpoint");
             let requests_db = get_request_requests_db.to_owned();
             async move { get_help_request(user, &requests_db).map_err(reject::custom) }
         });
@@ -104,6 +109,11 @@ fn request_help(
 
     users.add(&user.username, &user)?;
 
+    info!(
+        "`{}` successfully created a request for help",
+        user.username
+    );
+
     Ok(Response::builder().status(200).body(String::new())?)
 }
 
@@ -118,6 +128,11 @@ fn get_help_request(
                 "The ID for the help request stored in the server doesn't exist in the database",
             ))),
         };
+
+        debug!(
+            "`{}` successfully retrieved their help request",
+            user.username
+        );
 
         Ok(Response::builder()
             .status(200)
