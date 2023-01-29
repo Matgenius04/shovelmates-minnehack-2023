@@ -12,6 +12,7 @@ use crate::rejections::CustomRejection;
 static TOKEN_KEY: Lazy<Secret<[u8; 32]>> = Lazy::new(|| Secret::new(rand::random()));
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Token<'a> {
     username: &'a str,
     expiration_time: i64,

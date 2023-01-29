@@ -12,7 +12,7 @@ use crate::{
 };
 
 fn help_requests_initial_validation(
-    user_db: &Db<str, User>,
+    user_db: &Db<User>,
 ) -> impl Filter<Extract = (String, User), Error = Rejection> + Clone {
     trace!("Validating request for a help requests endpoint");
 
@@ -38,8 +38,8 @@ fn help_requests_initial_validation(
 }
 
 pub fn help_requests_filters(
-    user_db: &Db<str, User>,
-    help_requests: &Db<str, HelpRequest>,
+    user_db: &Db<User>,
+    help_requests: &Db<HelpRequest>,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let request_help_requests_db = help_requests.to_owned();
     let request_help_users_db = user_db.to_owned();
@@ -97,8 +97,8 @@ struct RequestHelpInfo {
 fn request_help(
     mut user: User,
     request_help_info: RequestHelpInfo,
-    help_requests: &Db<str, HelpRequest>,
-    users: &Db<str, User>,
+    help_requests: &Db<HelpRequest>,
+    users: &Db<User>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(_)) = &user.user_type {
         return Err(CustomRejection::AlreadyRequestedHelp);
@@ -141,7 +141,7 @@ fn request_help(
 
 fn get_help_request(
     user: User,
-    help_requests: &Db<str, HelpRequest>,
+    help_requests: &Db<HelpRequest>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(id)) = user.user_type {
         let help_request = match help_requests.get(&id)? {
@@ -171,8 +171,8 @@ fn get_help_request(
 
 fn delete_help_request(
     mut user: User,
-    user_db: &Db<str, User>,
-    help_requests: &Db<str, HelpRequest>,
+    user_db: &Db<User>,
+    help_requests: &Db<HelpRequest>,
 ) -> Result<Response<String>, CustomRejection> {
     if let UserType::Senior(Some(id)) = user.user_type {
         if help_requests.delete(&id)?.is_none() {

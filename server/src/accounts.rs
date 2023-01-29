@@ -18,6 +18,7 @@ enum UserTypeChoice {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateAccountInfo {
     username: String,
     name: String,
@@ -28,13 +29,14 @@ struct CreateAccountInfo {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct LoginInfo {
     username: String,
     password: Secret<String>,
 }
 
 pub fn accounts_filters(
-    db: &Db<str, User>,
+    db: &Db<User>,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
@@ -65,7 +67,7 @@ pub fn accounts_filters(
 }
 
 fn create_account(
-    db: &Db<str, User>,
+    db: &Db<User>,
     create_account_info: CreateAccountInfo,
 ) -> Result<Response<String>, CustomRejection> {
     debug!(
@@ -108,7 +110,7 @@ fn create_account(
         .body(create_token(&create_account_info.username)?)?)
 }
 
-fn login(db: &Db<str, User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
+fn login(db: &Db<User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
     debug!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
@@ -129,10 +131,7 @@ fn login(db: &Db<str, User>, login_info: LoginInfo) -> Result<Response<String>, 
         .body(create_token(&login_info.username)?)?)
 }
 
-fn get_account_info(
-    username: String,
-    db: &Db<str, User>,
-) -> Result<Response<String>, CustomRejection> {
+fn get_account_info(username: String, db: &Db<User>) -> Result<Response<String>, CustomRejection> {
     let user = match db.get(&username)? {
         Some(v) => v,
         None => {
