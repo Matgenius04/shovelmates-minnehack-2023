@@ -78,6 +78,8 @@ To make a help request, post a JSON object formatted as below to the route `/api
   }
 ```
 
+The server will respond with a `409` error if the user already created a help request
+
 ## Getting help requests
 
 To get a user's help request, post a JSON object formatted as below to `/api/help-requests`
@@ -96,6 +98,16 @@ The server will respond with the JSON object below if there is one, or a `409` e
     notes: string,
     creationTime: number, // Milliseconds since UNIX epoch
     state: "Pending" | { AcceptedBy: User } | { MarkedCompletedBy: User } // The users in the AcceptedBy and MarkedCompletedBy variants are guaranteed to be the same.
+  }
+```
+
+## Deleting help requests
+
+To delete a help request, post a JSON object formatted as below to `/api/delete-help-request`
+
+```
+  {
+    authorization: Authorization string
   }
 ```
 
@@ -160,10 +172,23 @@ To accept a request, post a JSON object as below to `/api/accept-request`
 
 ## Getting accepted requests
 
-To get all accepted requests, post a JSON object as below to `api/accepted-requests`
+To get all accepted requests, post a JSON object as below to `/api/accepted-requests`
 
 ```
   {
     authorization: Authorization string
   }
 ```
+
+## Marking a request as completed
+
+To mark a request as completed, post a JSON object as below to `/api/mark-request-completed`
+
+```
+  {
+    id: string,
+    authorization: Authorization string,
+  }
+```
+
+The server will respond with a `409` error if the id doesn't exist or wasn't previously accepted by the user

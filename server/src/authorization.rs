@@ -83,7 +83,7 @@ struct AuthorizationPart {
     authorization: Secret<String>,
 }
 
-pub fn authorize() -> impl Filter<Extract = (String,), Error = Rejection> {
+pub fn authorize() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
     warp::filters::body::json::<AuthorizationPart>().and_then(
         |auth: AuthorizationPart| async move {
             get_username_from_token_if_valid(&auth.authorization)

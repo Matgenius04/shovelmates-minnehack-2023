@@ -1,4 +1,4 @@
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use thiserror::Error;
 use warp::{
     body::BodyDeserializeError,
@@ -19,6 +19,12 @@ pub enum CustomRejection {
     UsernameDoesntExist(String),
     #[error("The password for `{0}` is incorrect")]
     IncorrectPassword(String),
+    #[error("You must have a Senior account to invoke help request endpoints")]
+    NotSenior,
+    #[error("You must have a Volunteer account to invoke help request endpoints")]
+    NotVolunteer,
+    #[error("You already requested help")]
+    AlreadyRequestedHelp,
     #[error("Unexpected server error: {0}")]
     Anyhow(#[from] anyhow::Error),
 }
@@ -33,6 +39,9 @@ impl CustomRejection {
             UsernameAlreadyExists(_) => StatusCode::CONFLICT,
             UsernameDoesntExist(_) => StatusCode::CONFLICT,
             IncorrectPassword(_) => StatusCode::FORBIDDEN,
+            NotSenior => StatusCode::METHOD_NOT_ALLOWED,
+            NotVolunteer => StatusCode::METHOD_NOT_ALLOWED,
+            AlreadyRequestedHelp => StatusCode::CONFLICT,
             Anyhow(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -43,7 +52,10 @@ impl CustomRejection {
         match self {
             ResponseCreationError(_) | Anyhow(_) => error!("{}", self.to_string()),
             InvalidToken | IncorrectPassword(_) => warn!("{}", self.to_string()),
-            UsernameAlreadyExists(_) | UsernameDoesntExist(_) => trace!("{}", self.to_string()),
+            NotSenior | NotVolunteer => info!("{}", self.to_string()),
+            UsernameAlreadyExists(_) | UsernameDoesntExist(_) | AlreadyRequestedHelp => {
+                trace!("{}", self.to_string())
+            }
         }
     }
 }
@@ -51,11 +63,11 @@ impl CustomRejection {
 impl reject::Reject for CustomRejection {}
 
 pub async fn handle_rejection(rejection: Rejection) -> Result<impl Reply, Rejection> {
-    if let Some(_) = rejection.find::<BodyDeserializeError>() {
-        return Ok(Response::builder()
+    if rejection.find::<BodyDeserializeError>().is_some() {
+        return Response::builder()
             .status(400)
             .body("Error deserializing body".to_owned())
-            .map_err(|e| reject::custom(CustomRejection::from(e)))?);
+            .map_err(|e| reject::custom(CustomRejection::from(e)));
     }
 
     if let Some(custom_rejection) = rejection.find::<CustomRejection>() {

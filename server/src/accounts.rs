@@ -10,13 +10,19 @@ use crate::{
     User, UserType,
 };
 
+#[derive(Deserialize, Clone, Copy)]
+enum UserTypeChoice {
+    Volunteer,
+    Senior,
+}
+
 #[derive(Deserialize)]
 struct CreateAccountInfo {
     username: String,
     name: String,
     address: String,
     location: (f64, f64),
-    user_type: UserType,
+    user_type: UserTypeChoice,
     password: Secret<String>,
 }
 
@@ -27,14 +33,14 @@ struct LoginInfo {
 }
 
 pub fn accounts_filters(
-    db: &Db<User>,
+    db: &Db<str, User>,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
         .and(warp::body::json::<CreateAccountInfo>())
         .and_then(move |create_account_info: CreateAccountInfo| {
             let db = create_account_db.to_owned();
-            async move { create_account(&db, create_account_info).map_err(|e| reject::custom(e)) }
+            async move { create_account(&db, create_account_info).map_err(reject::custom) }
         });
 
     let login_db = db.to_owned();
@@ -42,14 +48,14 @@ pub fn accounts_filters(
         .and(warp::body::json::<LoginInfo>())
         .and_then(move |login_info: LoginInfo| {
             let db = login_db.to_owned();
-            async move { login(&db, login_info).map_err(|e| reject::custom(e)) }
+            async move { login(&db, login_info).map_err(reject::custom) }
         });
 
     warp::post().and(create_account.or(login).unify())
 }
 
 fn create_account(
-    db: &Db<User>,
+    db: &Db<str, User>,
     create_account_info: CreateAccountInfo,
 ) -> Result<Response<String>, CustomRejection> {
     trace!(
@@ -72,7 +78,10 @@ fn create_account(
         name: create_account_info.name,
         address: create_account_info.address,
         location: create_account_info.location,
-        user_type: create_account_info.user_type,
+        user_type: match create_account_info.user_type {
+            UserTypeChoice::Volunteer => UserType::Volunteer(Vec::new()),
+            UserTypeChoice::Senior => UserType::Senior(None),
+        },
         salt,
         password_hash,
     };
@@ -89,7 +98,7 @@ fn create_account(
         .body(create_token(&create_account_info.username)?)?)
 }
 
-fn login(db: &Db<User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
+fn login(db: &Db<str, User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
     trace!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
