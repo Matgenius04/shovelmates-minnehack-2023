@@ -51,11 +51,11 @@ pub fn volunteering_filters(
 
     let get_request_requests_db = help_requests.to_owned();
     let get_request_user_db = user_db.to_owned();
-    let get_request = warp::path!("api" / "request-work")
+    let get_request = warp::path!("api" / "get-request")
         .and(volunteering_initial_validation(user_db))
         .and(warp::filters::body::json::<GetRequestData>())
         .and_then(move |username, user, get_request_data: GetRequestData| {
-            debug!("{username} is requesting work");
+            debug!("{username} is getting a request");
             let requests_db = get_request_requests_db.to_owned();
             let user_db = get_request_user_db.to_owned();
             async move {
@@ -64,7 +64,20 @@ pub fn volunteering_filters(
             }
         });
 
-    warp::post().and(request_work.or(get_request).unify())
+    let accepted_requests = warp::path!("api" / "accepted-requests")
+        .and(volunteering_initial_validation(user_db))
+        .and_then(move |username, user| {
+            debug!("{username} is getting their accepted requests");
+            async move { accepted_requests(user).map_err(reject::custom) }
+        });
+
+    warp::post().and(
+        request_work
+            .or(get_request)
+            .unify()
+            .or(accepted_requests)
+            .unify(),
+    )
 }
 
 fn request_work(
@@ -138,4 +151,15 @@ fn get_request(
             .status(409)
             .body("That request doesn't exist".to_string())?,
     })
+}
+
+fn accepted_requests(user: User) -> Result<Response<String>, CustomRejection> {
+    match user.user_type {
+        UserType::Volunteer(accepted) => Ok(Response::builder()
+            .status(200)
+            .body(serde_json::to_string(&accepted)?)?),
+        _ => Err(CustomRejection::Anyhow(anyhow::Error::msg(
+            "The user isn't a volunteer, this case should've been filtered earlier",
+        ))),
+    }
 }
