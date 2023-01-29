@@ -34,6 +34,28 @@ Post the server a JSON object formatted as below to the route `/api/login`:
 
 The server will give a `409` error if the username doesn't exist or a `403` error if the password is incorrect. Otherwise it will give an authorization string.
 
+## Getting user data
+
+To get the user's data, send a JSON object formatted as below to `/api/user-data`
+
+```
+  {
+    authorization: Authorization string
+  }
+```
+
+The server will return a JSON object formatted as below:
+
+```
+  {
+    username: string,
+    name: string,
+    address: string,
+    location: [number, number], // [lat, long]
+    user_type: { Volunteer: string[] } | { Senior: string | null }, // Volunteer contains a list of every request ID they've accepted, Senior contains the request ID of the request they've made
+  }
+```
+
 ## Authorization string
 
 This is a string formatted as:
