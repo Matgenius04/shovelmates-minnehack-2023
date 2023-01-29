@@ -102,7 +102,12 @@ async fn main() {
     let get = warp::get().and(warp::fs::dir("../frontend/build"));
     let post = warp::post().and(accounts.or(help_requests).or(volunteering));
 
-    let routes = get.or(post).recover(handle_rejection);
+    let routes = get.or(post).recover(handle_rejection).with(
+        warp::cors()
+            .allow_any_origin()
+            .allow_methods(["GET", "POST"])
+            .allow_headers(["Content-Type"]),
+    );
 
     info!("Serving");
 
