@@ -51,4 +51,13 @@ impl<K: AsRef<[u8]> + Debug + ?Sized, T: Serialize + DeserializeOwned> Db<K, T> 
             None => Ok(None),
         }
     }
+
+    pub fn delete(&self, key: &K) -> Result<Option<T>, anyhow::Error> {
+        trace!("Deleting {key:?} from the {} database", type_name::<T>());
+
+        match self.0.remove(key)? {
+            Some(v) => Ok(serde_json::from_slice(&v)?),
+            None => Ok(None),
+        }
+    }
 }

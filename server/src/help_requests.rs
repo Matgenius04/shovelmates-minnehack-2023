@@ -63,7 +63,27 @@ pub fn help_requests_filters(
             async move { get_help_request(user, &requests_db).map_err(reject::custom) }
         });
 
-    warp::post().and(request_help.or(get_requests).unify())
+    let delete_request_requests_db = help_requests.to_owned();
+    let delete_request_users_db = user_db.to_owned();
+    let delete_request = warp::path!("api" / "delete-help-request")
+        .and(help_requests_initial_validation(user_db))
+        .and_then(move |username, user| {
+            debug!("`{username}` hit delete-help-request endpoint");
+            let requests_db = delete_request_requests_db.to_owned();
+            let users_db = delete_request_users_db.to_owned();
+            async move {
+                delete_help_request(user, &users_db, &requests_db)
+                    .map_err(reject::custom)
+            }
+        });
+
+    warp::post().and(
+        request_help
+            .or(get_requests)
+            .unify()
+            .or(delete_request)
+            .unify(),
+    )
 }
 
 #[derive(Deserialize)]
@@ -145,4 +165,40 @@ fn get_help_request(
     } else {
         Err(CustomRejection::DidntRequestHelp)
     }
+}
+
+fn delete_help_request(
+    mut user: User,
+    user_db: &Db<str, User>,
+    help_requests: &Db<[u8; 32], HelpRequest>,
+) -> Result<Response<String>, CustomRejection> {
+    if let UserType::Senior(Some(id)) = user.user_type {
+        if help_requests.delete(&id)?.is_none() {
+            return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+                "The ID for the help request stored in the server doesn't exist in the database",
+            )));
+        };
+
+        user.user_type = UserType::Senior(None);
+
+        user_db.add(&user.username, &user)?;
+
+        info!(
+            "`{}` successfully deleted their help request",
+            user.username
+        );
+
+        return Ok(Response::builder()
+            .status(200)
+            .body("Successfully deleted help request".to_owned())?);
+    }
+
+    debug!(
+        "`{}` tried to delete their help request but there was nothing to delete",
+        user.username
+    );
+
+    Ok(Response::builder()
+        .status(200)
+        .body("There was nothing to delete".to_owned())?)
 }
