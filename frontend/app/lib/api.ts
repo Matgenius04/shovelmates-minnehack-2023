@@ -1,11 +1,11 @@
 import { ApplicationSettings } from "@nativescript/core";
-import { Image } from "@nativescript/core";
+import { Image, ImageAsset, ImageSource } from "@nativescript/core";
 import { navigate } from "svelte-native";
 import { alert, confirm } from '@nativescript/core/ui/dialogs'
 
 import Splash from "~/pages/Splash.svelte";
 
-const serverURL = "https://10.0.0.2:8080"
+const serverURL = "http://10.0.2.2:8080"
 
 export const stateList: String[] = ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","District of Columbia","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming"]
 export type State = typeof stateList[number];
@@ -66,14 +66,18 @@ export enum SelfRequestError {
   unknownError
 }
 export type SelfRequestResult = {
-  picture: Image,
+  picture: ImageSource,
   notes: String,
   creationTime: Date,
   state: "Pending" | { AcceptedBy: User } | { MarkedCompletedBy: User }
 }
 export type HelpRequest = {
-  picture: Image,
-  notes: String
+  picture: string,
+  notes: string
+}
+export type HelpRequestParsed = {
+  picture: ImageSource,
+  notes: string
 }
 export enum WorkRequestError {
   success,
@@ -86,14 +90,14 @@ export type WorkRequestByID = {
 }
 export type WorkRequestByIDResult = {
   user: User,
-  picture: Image,
-  notes: String,
-  dist: Number,
-  address: String
+  picture: ImageSource,
+  notes: string,
+  dist: number,
+  address: string
 }
 
-export const invalidAddressAlert = () => {
-  alert({
+export const invalidAddressAlert = async () => {
+  await alert({
   title: "Invalid Address Input",
   message: "Missing Required Address Data"
   })
@@ -104,6 +108,12 @@ export const invalidAddressAlert = () => {
 export const generateErrorDialog = (msg: string): void => {
   alert({
     title: "Error",
+    message: msg
+  });
+}
+export const generateSuccessDialog = (msg: string): void => {
+  alert({
+    title: "Success",
     message: msg
   });
 }
@@ -149,7 +159,8 @@ const addressToLonLat = async (address: FilledAddress) : Promise<[Number, Number
   const lonLat = [queryData?.lat, queryData?.lon]
   if (!lonLat[0] || !lonLat[1]) return LonLatRequestError.unknownError;
   console.log(lonLat)
-  return lonLat as [Number, Number];
+  // @ts-expect-error
+  return lonLat.map(v=>Number(v)) as [Number, Number];
 }
 
 // TODO: Implement
@@ -157,26 +168,38 @@ const askUserToCheckIfAddressIsCorrect = () => {
   
 }
 
+const parseRequestImage = async (json: {picture:string}): Promise<any> => {
+  // @ts-expect-error
+  json.picture = await ImageSource.fromBase64(json);
+  return json;
+}
 const getAuthorizationString = () : string => {
   const authorizationString = ApplicationSettings.getString("AuthorizationString")
-  const parsed = JSON.parse(authorizationString)
-  if (Date.now() > parsed.expirationTime) {
-    navigate({page: Splash})
-    throw "Authorization Token Expired"
+  console.log(authorizationString);
+  try {
+    const parsed = JSON.parse(authorizationString)
+    if (Date.now() > parsed.expirationTime) {
+      navigate({page: Splash})
+      throw "Authorization Token Expired"
+    }
+    if (authorizationString == "") {
+      navigate({page: Splash})
+      throw "No Authorization String Found"
+    }
+    return authorizationString
+  } catch {
+    throw "Inavalid authorization token";
   }
-  if (authorizationString == "") {
-    navigate({page: Splash})
-    throw "No Authorization String Found"
-  }
-  return authorizationString
 }
 export const createAccount = async (user: UserSignup) : Promise<LoginResult> => {
   console.log(user);
   const location = await addressToLonLat(user.address)
-  const addressString = concatAddress(user.address)
+  const addressString = await concatAddress(user.address)
   if (location == LonLatRequestError.unknownError) return LoginResult.addressError;
-  const test = fetch(`${serverURL}/api/create-account`, {
+  const res = await fetch(`${serverURL}/api/create-account`, {
     method: "POST",
+    mode: "cors",
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       username: user.username, 
       name: user.name,
@@ -184,20 +207,15 @@ export const createAccount = async (user: UserSignup) : Promise<LoginResult> => 
       location,
       userType: user.userType,
       password: user.password
-    }),
-    redirect: "follow"
+    })
   })
-  console.log(test)
-  const res = await test
-  console.log(await res)
-  console.log(await res.text())
   if (res.status == 409) return LoginResult.usernameError;
   if (!res.ok) return LoginResult.unknownError;
   ApplicationSettings.setString("AuthorizationString", await res.text());
   return LoginResult.success;
 }
 export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> => {
-  const res = await fetch("/api/login", {
+  const res = await fetch(`${serverURL}/api/login`, {
     method: "POST",
     body: JSON.stringify(loginInfo)
   })
@@ -207,8 +225,10 @@ export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> =
   return LoginResult.unknownError
 }
 export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpRequestResult> => {
-  const res = await fetch("/request-help", {
+  await console.log({authorization: getAuthorizationString()})
+  const res = await fetch(`${serverURL}/request-help`, {
     method: "POST",
+    mode: 'cors',
     body: JSON.stringify({...helpRequest, authorization: getAuthorizationString()})
   })
   if (res.status == 405) return HelpRequestResult.notSenior
@@ -216,16 +236,16 @@ export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpReques
   return HelpRequestResult.success;
 }
 export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestResult> => {
-  const res = await fetch("/help-requests", {
+  const res = await fetch(`${serverURL}/help-requests`, {
     method: "POST",
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
   if (res.status == 409) return SelfRequestError.nonexistentError
   if (!res.ok) return SelfRequestError.unknownError
-  return res.json();
+  return parseRequestImage(await res.json());
 }
 export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestError> => {
-  const res = await fetch("/request-work", {
+  const res = await fetch(`${serverURL}/request-work`, {
     method: "POST",
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
@@ -234,30 +254,23 @@ export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestEr
   return res.json();
 }
 export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequestByIDResult | WorkRequestError> => {
-  const res = await fetch("/help-requests", {
+  const res = await fetch(`${serverURL}/help-requests`, {
     method: "POST",
     body: JSON.stringify({...id, authorization: getAuthorizationString()})
   })
   if (res.status == 405) return WorkRequestError.notVolunteer
   if (!res.ok) return WorkRequestError.unknownError
-  return res.json();
+  return parseRequestImage(await res.json()) as Promise<WorkRequestByIDResult>;
 }
 export const getUserData = async (): Promise<UserData> => {
-  const res = await fetch("/api/user-data", {
+  console.log("bruh")
+  const res = await fetch(`${serverURL}/api/user-data`, {
+    mode: "cors",
+    headers: {"Content-Type": "application/json"},
     method: "POST",
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
+  console.log("bruh")
   if (!res.ok) throw "User data not found";
   return res.json()
-}
-
-export const testServer = async () => {
-  // console.log(await fetch(serverURL+"/api/create-account"))
-  console.log("BRUH");
-  console.log(await (await fetch("http://asdf.com",{
-    referrerPolicy: 'origin',
-    cache: 'no-cache',
-    mode: 'cors',
-  })).status)
-  console.log("YAY?")
 }
