@@ -4,10 +4,10 @@
     generateErrorDialog,
     getUserData,
     invalidAddressAlert,
+    stateAbbreviations,
   } from "~/lib/api";
   import {
     Address,
-    stateList,
     UserType,
     login,
     createAccount,
@@ -130,7 +130,7 @@
             <stackLayout orientation="horizontal">
               <label text="State" />
               <listPicker
-                items={stateList}
+                items={stateAbbreviations}
                 bind:selectedValue={address.state}
                 verticalAlignment="stretch"
                 selectedIndex="23"
