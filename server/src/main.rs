@@ -145,12 +145,13 @@ impl<V, T: RkyvDeserialize<V, rkyv::Infallible>> InfallibleDeserialize<V> for T 
 async fn main() {
     pretty_env_logger::init();
 
-    let db = Db::open("users");
-    let help_requests_db = Db::open("help-requests");
+    let db = sled::open("db").expect("the DB to open properly");
+    let users_db: UserDB = Db::open(&db, "users");
+    let help_requests_db: HelpRequestDB = Db::open(&db, "help-requests");
 
-    let accounts = accounts_filters(&db);
-    let help_requests = help_requests_filters(&db, &help_requests_db);
-    let volunteering = volunteering_filters(&db, &help_requests_db);
+    let accounts = accounts_filters(&users_db);
+    let help_requests = help_requests_filters(&users_db, &help_requests_db);
+    let volunteering = volunteering_filters(&users_db, &help_requests_db);
 
     let get = warp::get().and(warp::fs::dir("../frontend/build"));
     let post = warp::post().and(accounts.or(help_requests).or(volunteering));

@@ -14,7 +14,7 @@ use sled::{
 };
 
 pub struct Db<const N: usize, T: rkyv::Serialize<AllocSerializer<N>> + Archive>(
-    Arc<sled::Db>,
+    Arc<sled::Tree>,
     PhantomData<T>,
 );
 
@@ -95,11 +95,11 @@ where
 }
 
 impl<const N: usize, T: rkyv::Serialize<AllocSerializer<N>> + Archive> Db<N, T> {
-    pub fn open(string: &str) -> Db<N, T> {
+    pub fn open(db: &sled::Db, string: &str) -> Db<N, T> {
         info!("Opening {} DB from {string}", type_name::<T>());
 
         Db(
-            Arc::new(sled::open(string).expect("the database to be available")),
+            Arc::new(db.open_tree(string).expect("the database to be available")),
             PhantomData,
         )
     }
