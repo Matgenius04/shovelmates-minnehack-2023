@@ -1,83 +1,81 @@
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
 use chrono::Utc;
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use rkyv::option::ArchivedOption;
 use serde::Deserialize;
 use serde_json::json;
-use warp::{hyper::Response, reject, Filter, Rejection};
-
-use crate::{
-    authorization::authorize, db::Archived, rejections::CustomRejection, ArchivedUserType,
-    HelpRequest, HelpRequestDB, HelpRequestState, User, UserDB, UserType,
+use warp::{
+    body::bytes,
+    hyper::{body::Bytes, Body, Response},
+    Filter, Rejection,
 };
 
-fn help_requests_initial_validation(
+use crate::{
+    authorization::authorize, clone_dbs, db::Archived, errors::Error, extract_json,
+    ArchivedUserType, HelpRequest, HelpRequestDB, HelpRequestState, User, UserDB, UserType,
+};
+
+fn help_request_endpoint(
+    bytes: &Bytes,
     user_db: &UserDB,
-) -> impl Filter<Extract = (String, Archived<User>), Error = Rejection> + Clone {
+    callback: impl FnOnce(&Bytes, String, Archived<User>) -> Result<Response<Body>, Error>,
+) -> Result<Response<Body>, Error> {
     trace!("Validating request for a help requests endpoint");
 
     let invoker_getter_db = user_db.to_owned();
 
-    authorize()
-        .and_then(move |username: String| {
-            let user_db = invoker_getter_db.to_owned();
-            async move {
-                let user = user_db
-                    .get(&username)
-                    .map_err(|e| reject::custom::<CustomRejection>(e.into()))?
-                    .ok_or_else(|| reject::custom(CustomRejection::InvalidToken))?;
+    let username = authorize(bytes)?;
+    let user_db = invoker_getter_db.to_owned();
 
-                if !matches!(user.user_type, ArchivedUserType::Senior(_)) {
-                    return Err(reject::custom(CustomRejection::NotSenior));
-                }
+    let user = user_db
+        .get(&username)?
+        .ok_or_else(|| {error!("A token with an incorrect username was generated or someone cracked the tokens somehow"); anyhow::Error::msg("Oofy token")})?;
 
-                Ok((username, user))
-            }
-        })
-        .untuple_one()
+    if !matches!(user.user_type, ArchivedUserType::Senior(_)) {
+        return Err(Error::NotSenior);
+    }
+
+    callback(bytes, username, user)
 }
 
 pub fn help_requests_filters(
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
-    let request_help_requests_db = help_requests.to_owned();
-    let request_help_users_db = user_db.to_owned();
+) -> impl Filter<Extract = (Result<Response<Body>, Error>,), Error = Rejection> + Clone {
     let request_help = warp::path!("api" / "request-help")
-        .and(help_requests_initial_validation(user_db))
-        .and(warp::body::json::<RequestHelpInfo>())
-        .and_then(move |username, user, request_help_info| {
-            debug!("`{username}` hit request-help endpoint");
-            let requests_db = request_help_requests_db.to_owned();
-            let users_db = request_help_users_db.to_owned();
-            async move {
-                request_help(user, request_help_info, &requests_db, &users_db)
-                    .map_err(reject::custom)
-            }
+        .and(bytes())
+        .and(clone_dbs(user_db, help_requests))
+        .map(move |bytes, users_db, requests_db| {
+            help_request_endpoint(&bytes, &users_db, |bytes, username, user| {
+                debug!("`{username}` hit request-help endpoint");
+                request_help(
+                    user,
+                    extract_json::<RequestHelpInfo>(bytes)?,
+                    &requests_db,
+                    &users_db,
+                )
+            })
         });
 
-    let get_request_requests_db = help_requests.to_owned();
     let get_requests = warp::path!("api" / "help-requests")
-        .and(help_requests_initial_validation(user_db))
-        .and_then(move |username, user| {
-            debug!("`{username}` hit help-requests endpoint");
-            let requests_db = get_request_requests_db.to_owned();
-            async move { get_help_request(user, &requests_db).map_err(reject::custom) }
+        .and(bytes())
+        .and(clone_dbs(user_db, help_requests))
+        .map(move |bytes, users_db, requests_db| {
+            help_request_endpoint(&bytes, &users_db, |_, username, user| {
+                debug!("`{username}` hit help-requests endpoint");
+                get_help_request(user, &requests_db)
+            })
         });
 
-    let delete_request_requests_db = help_requests.to_owned();
-    let delete_request_users_db = user_db.to_owned();
     let delete_request = warp::path!("api" / "delete-help-request")
-        .and(help_requests_initial_validation(user_db))
-        .and_then(move |username, user| {
-            debug!("`{username}` hit delete-help-request endpoint");
-            let requests_db = delete_request_requests_db.to_owned();
-            let users_db = delete_request_users_db.to_owned();
-            async move {
+        .and(bytes())
+        .and(clone_dbs(user_db, help_requests))
+        .map(move |bytes, users_db, requests_db| {
+            help_request_endpoint(&bytes, &users_db, |_, username, user| {
+                debug!("`{username}` hit delete-help-request endpoint");
                 delete_help_request(user, &users_db, &requests_db)
-                    .map_err(reject::custom)
-            }
+            })
         });
 
     warp::post().and(
@@ -100,9 +98,9 @@ fn request_help(
     request_help_info: RequestHelpInfo,
     help_requests: &HelpRequestDB,
     users: &UserDB,
-) -> Result<Response<String>, CustomRejection> {
+) -> Result<Response<Body>, Error> {
     if let ArchivedUserType::Senior(ArchivedOption::Some(_)) = &user.user_type {
-        return Err(CustomRejection::AlreadyRequestedHelp);
+        return Err(Error::AlreadyRequestedHelp);
     }
 
     let mut user_de: User = user.to_original();
@@ -139,17 +137,17 @@ fn request_help(
         user.username
     );
 
-    Ok(Response::builder().status(200).body(String::new())?)
+    Ok(Response::builder().status(200).body(Body::empty())?)
 }
 
 fn get_help_request(
     user: Archived<User>,
     help_requests: &HelpRequestDB,
-) -> Result<Response<String>, CustomRejection> {
+) -> Result<Response<Body>, Error> {
     if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
         let help_request = match help_requests.get(&id)? {
             Some(v) => v,
-            None => return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+            None => return Err(Error::Anyhow(anyhow::Error::msg(
                 "The ID for the help request stored in the server doesn't exist in the database",
             ))),
         };
@@ -161,14 +159,14 @@ fn get_help_request(
 
         Ok(Response::builder()
             .status(200)
-            .body(serde_json::to_string(&json!({
+            .body(Body::from(serde_json::to_string(&json!({
                 "picture": &*help_request.picture,
                 "notes": &*help_request.notes,
                 "creationTime": help_request.creation_time,
                 "state": help_request.state.to_json(),
-            }))?)?)
+            }))?))?)
     } else {
-        Err(CustomRejection::DidntRequestHelp)
+        Err(Error::DidntRequestHelp)
     }
 }
 
@@ -176,10 +174,10 @@ fn delete_help_request(
     user: Archived<User>,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> Result<Response<String>, CustomRejection> {
+) -> Result<Response<Body>, Error> {
     if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
         if help_requests.delete(&id)?.is_none() {
-            return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+            return Err(Error::Anyhow(anyhow::Error::msg(
                 "The ID for the help request stored in the server doesn't exist in the database",
             )));
         };
@@ -197,7 +195,7 @@ fn delete_help_request(
 
         return Ok(Response::builder()
             .status(200)
-            .body("Successfully deleted help request".to_owned())?);
+            .body(Body::from("Successfully deleted help request"))?);
     }
 
     debug!(
@@ -207,5 +205,5 @@ fn delete_help_request(
 
     Ok(Response::builder()
         .status(200)
-        .body("There was nothing to delete".to_owned())?)
+        .body(Body::from("There was nothing to delete"))?)
 }

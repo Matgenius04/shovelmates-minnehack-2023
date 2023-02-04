@@ -5,9 +5,9 @@ use once_cell::sync::Lazy;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use warp::{reject, Filter, Rejection};
+use warp::hyper::body::Bytes;
 
-use crate::rejections::CustomRejection;
+use crate::{errors::Error, extract_json};
 
 static TOKEN_KEY: Lazy<Secret<[u8; 32]>> = Lazy::new(|| Secret::new(rand::random()));
 
@@ -96,12 +96,10 @@ struct AuthorizationPart {
     authorization: Secret<String>,
 }
 
-pub fn authorize() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
-    warp::filters::body::json::<AuthorizationPart>().and_then(
-        |auth: AuthorizationPart| async move {
-            get_username_from_token_if_valid(&auth.authorization)
-                .ok_or_else(|| reject::custom(CustomRejection::InvalidToken))
-                .map(|v| v.to_owned())
-        },
-    )
+pub fn authorize(bytes: &Bytes) -> Result<String, Error> {
+    let auth = extract_json::<AuthorizationPart>(bytes)?.authorization;
+
+    get_username_from_token_if_valid(&auth)
+        .ok_or_else(|| Error::InvalidToken)
+        .map(|v| v.to_owned())
 }

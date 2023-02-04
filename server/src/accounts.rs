@@ -2,11 +2,15 @@ use log::{debug, info};
 use secrecy::Secret;
 use serde::Deserialize;
 use serde_json::json;
-use warp::{hyper::Response, reject, Filter, Rejection};
+use warp::{
+    body::bytes,
+    hyper::{Body, Response},
+    Filter, Rejection,
+};
 
 use crate::{
     authorization::{authorize, create_token, hash_password},
-    rejections::CustomRejection,
+    errors::Error,
     InfallibleDeserialize, Location, User, UserDB, UserType,
 };
 
@@ -36,31 +40,31 @@ struct LoginInfo {
 
 pub fn accounts_filters(
     db: &UserDB,
-) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (Result<Response<Body>, Error>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
         .and(warp::body::json::<CreateAccountInfo>())
-        .and_then(move |create_account_info: CreateAccountInfo| {
+        .map(move |create_account_info: CreateAccountInfo| {
             let db = create_account_db.to_owned();
-            async move { create_account(&db, create_account_info).map_err(reject::custom) }
+            create_account(&db, create_account_info)
         });
 
     let login_db = db.to_owned();
     let login = warp::path!("api" / "login")
         .and(warp::body::json::<LoginInfo>())
-        .and_then(move |login_info: LoginInfo| {
+        .map(move |login_info: LoginInfo| {
             let db = login_db.to_owned();
-            async move { login(&db, login_info).map_err(reject::custom) }
+            login(&db, login_info)
         });
 
     let account_info_db = db.to_owned();
-    let account_info =
-        warp::path!("api" / "user-data")
-            .and(authorize())
-            .and_then(move |username| {
-                let db = account_info_db.to_owned();
-                async move { get_account_info(username, &db).map_err(reject::custom) }
-            });
+    let account_info = warp::path!("api" / "user-data")
+        .and(bytes())
+        .map(move |bytes| {
+            let username = authorize(&bytes)?;
+            let db = account_info_db.to_owned();
+            get_account_info(username, &db)
+        });
 
     warp::post().and(create_account.or(login).unify().or(account_info).unify())
 }
@@ -68,16 +72,14 @@ pub fn accounts_filters(
 fn create_account(
     db: &UserDB,
     create_account_info: CreateAccountInfo,
-) -> Result<Response<String>, CustomRejection> {
+) -> Result<Response<Body>, Error> {
     debug!(
         "Attempting to create an account for {}",
         &create_account_info.username
     );
 
     if db.contains(&create_account_info.username)? {
-        return Err(CustomRejection::UsernameAlreadyExists(
-            create_account_info.username,
-        ));
+        return Err(Error::UsernameAlreadyExists(create_account_info.username));
     }
 
     let salt = rand::random::<[u8; 32]>();
@@ -106,35 +108,35 @@ fn create_account(
 
     Ok(Response::builder()
         .status(200)
-        .body(create_token(&create_account_info.username)?)?)
+        .body(Body::from(create_token(&create_account_info.username)?))?)
 }
 
-fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
+fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<Body>, Error> {
     debug!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
         Some(user) => user,
         None => {
-            return Err(CustomRejection::UsernameDoesntExist(login_info.username));
+            return Err(Error::UsernameDoesntExist(login_info.username));
         }
     };
 
     if user.password_hash != hash_password(&login_info.password, user.salt) {
-        return Err(CustomRejection::IncorrectPassword(login_info.username));
+        return Err(Error::IncorrectPassword(login_info.username));
     }
 
     info!("{} logged in", &login_info.username);
 
     Ok(Response::builder()
         .status(200)
-        .body(create_token(&login_info.username)?)?)
+        .body(Body::from(create_token(&login_info.username)?))?)
 }
 
-fn get_account_info(username: String, db: &UserDB) -> Result<Response<String>, CustomRejection> {
+fn get_account_info(username: String, db: &UserDB) -> Result<Response<Body>, Error> {
     let user = match db.get(&username)? {
         Some(v) => v,
         None => {
-            return Err(CustomRejection::Anyhow(anyhow::Error::msg(
+            return Err(Error::Anyhow(anyhow::Error::msg(
                 "The username doesn't exist in the database",
             )))
         }
@@ -144,11 +146,11 @@ fn get_account_info(username: String, db: &UserDB) -> Result<Response<String>, C
 
     Ok(Response::builder()
         .status(200)
-        .body(serde_json::to_string(&json!({
+        .body(Body::from(serde_json::to_string(&json!({
             "username": &*user.username,
             "name": &*user.name,
             "address": &*user.address,
             "location": <(f64, f64) as From<Location>>::from(user.location),
             "user_type": InfallibleDeserialize::<UserType>::deserialize(&user.user_type),
-        }))?)?)
+        }))?))?)
 }

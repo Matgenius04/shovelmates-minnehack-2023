@@ -1,20 +1,26 @@
 mod accounts;
 mod authorization;
 mod db;
+mod errors;
 mod help_requests;
-mod rejections;
 mod volunteering;
+
+use std::convert::Infallible;
 
 use db::{Archived, Db};
 use geo::algorithm::geodesic_distance::GeodesicDistance;
 use log::info;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
-use warp::Filter;
+use warp::{
+    filters::any,
+    hyper::{body::Bytes, Body, Response},
+    Filter,
+};
 
 use crate::{
-    accounts::accounts_filters, help_requests::help_requests_filters, rejections::handle_rejection,
+    accounts::accounts_filters, errors::Error, help_requests::help_requests_filters,
     volunteering::volunteering_filters,
 };
 
@@ -141,6 +147,21 @@ trait InfallibleDeserialize<T>: RkyvDeserialize<T, rkyv::Infallible> {
 
 impl<V, T: RkyvDeserialize<V, rkyv::Infallible>> InfallibleDeserialize<V> for T {}
 
+pub fn extract_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, Error> {
+    serde_json::from_slice(bytes.as_ref()).map_err(|e| Error::JSON(e))
+}
+
+pub fn clone<V: Clone + Send>(v: V) -> impl Filter<Extract = (V,), Error = Infallible> + Clone {
+    any::any().map(move || v.to_owned())
+}
+
+pub fn clone_dbs(
+    user_db: &UserDB,
+    requests_db: &HelpRequestDB,
+) -> impl Filter<Extract = (UserDB, HelpRequestDB), Error = Infallible> + Clone {
+    clone(user_db.to_owned()).and(clone(requests_db.to_owned()))
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
@@ -154,9 +175,14 @@ async fn main() {
     let volunteering = volunteering_filters(&users_db, &help_requests_db);
 
     let get = warp::get().and(warp::fs::dir("../frontend/build"));
-    let post = warp::post().and(accounts.or(help_requests).or(volunteering));
+    let post = warp::post()
+        .and(accounts.or(help_requests).unify().or(volunteering).unify())
+        .map(|v: Result<Response<Body>, Error>| match v {
+            Ok(v) => v,
+            Err(e) => e.into_response(),
+        });
 
-    let routes = get.or(post).recover(handle_rejection).with(
+    let routes = get.or(post).with(
         warp::cors()
             .allow_any_origin()
             .allow_methods(["GET", "POST"])
