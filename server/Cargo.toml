@@ -23,3 +23,5 @@ log = "0.4"
 secrecy = { version = "0.8", features = ["serde"] }
 base64 = "0.21" 
 geo = "0.23"
+rkyv = { version = "0.7.39", features = ["alloc", "strict"] }
+ouroboros = "0.15"

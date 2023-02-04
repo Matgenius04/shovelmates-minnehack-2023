@@ -6,9 +6,8 @@ use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
     authorization::{authorize, create_token, hash_password},
-    db::Db,
     rejections::CustomRejection,
-    User, UserType,
+    InfallibleDeserialize, Location, User, UserDB, UserType,
 };
 
 #[derive(Deserialize, Clone, Copy)]
@@ -36,7 +35,7 @@ struct LoginInfo {
 }
 
 pub fn accounts_filters(
-    db: &Db<User>,
+    db: &UserDB,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
@@ -67,7 +66,7 @@ pub fn accounts_filters(
 }
 
 fn create_account(
-    db: &Db<User>,
+    db: &UserDB,
     create_account_info: CreateAccountInfo,
 ) -> Result<Response<String>, CustomRejection> {
     debug!(
@@ -89,7 +88,7 @@ fn create_account(
         username: create_account_info.username.to_owned(),
         name: create_account_info.name,
         address: create_account_info.address,
-        location: create_account_info.location,
+        location: create_account_info.location.into(),
         user_type: match create_account_info.user_type {
             UserTypeChoice::Volunteer => UserType::Volunteer(Vec::new()),
             UserTypeChoice::Senior => UserType::Senior(None),
@@ -110,7 +109,7 @@ fn create_account(
         .body(create_token(&create_account_info.username)?)?)
 }
 
-fn login(db: &Db<User>, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
+fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<String>, CustomRejection> {
     debug!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
@@ -131,7 +130,7 @@ fn login(db: &Db<User>, login_info: LoginInfo) -> Result<Response<String>, Custo
         .body(create_token(&login_info.username)?)?)
 }
 
-fn get_account_info(username: String, db: &Db<User>) -> Result<Response<String>, CustomRejection> {
+fn get_account_info(username: String, db: &UserDB) -> Result<Response<String>, CustomRejection> {
     let user = match db.get(&username)? {
         Some(v) => v,
         None => {
@@ -146,10 +145,10 @@ fn get_account_info(username: String, db: &Db<User>) -> Result<Response<String>,
     Ok(Response::builder()
         .status(200)
         .body(serde_json::to_string(&json!({
-            "username": user.username,
-            "name": user.name,
-            "address": user.address,
-            "location": user.location,
-            "user_type": user.user_type
+            "username": &*user.username,
+            "name": &*user.name,
+            "address": &*user.address,
+            "location": <(f64, f64) as From<Location>>::from(user.location),
+            "user_type": InfallibleDeserialize::<UserType>::deserialize(&user.user_type),
         }))?)?)
 }

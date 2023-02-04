@@ -2,18 +2,19 @@ use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
 use chrono::Utc;
 use log::{debug, info, trace};
+use rkyv::option::ArchivedOption;
 use serde::Deserialize;
 use serde_json::json;
 use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
-    authorization::authorize, db::Db, rejections::CustomRejection, HelpRequest, HelpRequestState,
-    User, UserType,
+    authorization::authorize, db::Archived, rejections::CustomRejection, ArchivedUserType,
+    HelpRequest, HelpRequestDB, HelpRequestState, User, UserDB, UserType,
 };
 
 fn help_requests_initial_validation(
-    user_db: &Db<User>,
-) -> impl Filter<Extract = (String, User), Error = Rejection> + Clone {
+    user_db: &UserDB,
+) -> impl Filter<Extract = (String, Archived<User>), Error = Rejection> + Clone {
     trace!("Validating request for a help requests endpoint");
 
     let invoker_getter_db = user_db.to_owned();
@@ -27,7 +28,7 @@ fn help_requests_initial_validation(
                     .map_err(|e| reject::custom::<CustomRejection>(e.into()))?
                     .ok_or_else(|| reject::custom(CustomRejection::InvalidToken))?;
 
-                if !matches!(user.user_type, UserType::Senior(_)) {
+                if !matches!(user.user_type, ArchivedUserType::Senior(_)) {
                     return Err(reject::custom(CustomRejection::NotSenior));
                 }
 
@@ -38,8 +39,8 @@ fn help_requests_initial_validation(
 }
 
 pub fn help_requests_filters(
-    user_db: &Db<User>,
-    help_requests: &Db<HelpRequest>,
+    user_db: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let request_help_requests_db = help_requests.to_owned();
     let request_help_users_db = user_db.to_owned();
@@ -95,21 +96,23 @@ struct RequestHelpInfo {
 }
 
 fn request_help(
-    mut user: User,
+    user: Archived<User>,
     request_help_info: RequestHelpInfo,
-    help_requests: &Db<HelpRequest>,
-    users: &Db<User>,
+    help_requests: &HelpRequestDB,
+    users: &UserDB,
 ) -> Result<Response<String>, CustomRejection> {
-    if let UserType::Senior(Some(_)) = &user.user_type {
+    if let ArchivedUserType::Senior(ArchivedOption::Some(_)) = &user.user_type {
         return Err(CustomRejection::AlreadyRequestedHelp);
     }
+
+    let mut user_de: User = user.to_original();
 
     let help_request = HelpRequest {
         picture: request_help_info.picture,
         notes: request_help_info.notes,
         creation_time: Utc::now().timestamp_millis(),
         state: HelpRequestState::Pending,
-        username: user.username,
+        username: user_de.username,
     };
 
     let mut id;
@@ -125,11 +128,11 @@ fn request_help(
     help_requests.add(&id, &help_request)?;
 
     // Transfer ownership back
-    user.username = help_request.username;
+    user_de.username = help_request.username;
 
-    user.user_type = UserType::Senior(Some(id));
+    user_de.user_type = UserType::Senior(Some(id));
 
-    users.add(&user.username, &user)?;
+    users.add(&user.username, &user_de)?;
 
     info!(
         "`{}` successfully created a request for help",
@@ -140,10 +143,10 @@ fn request_help(
 }
 
 fn get_help_request(
-    user: User,
-    help_requests: &Db<HelpRequest>,
+    user: Archived<User>,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<String>, CustomRejection> {
-    if let UserType::Senior(Some(id)) = user.user_type {
+    if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
         let help_request = match help_requests.get(&id)? {
             Some(v) => v,
             None => return Err(CustomRejection::Anyhow(anyhow::Error::msg(
@@ -159,10 +162,10 @@ fn get_help_request(
         Ok(Response::builder()
             .status(200)
             .body(serde_json::to_string(&json!({
-                "picture": help_request.picture,
-                "notes": help_request.notes,
+                "picture": &*help_request.picture,
+                "notes": &*help_request.notes,
                 "creationTime": help_request.creation_time,
-                "state": help_request.state,
+                "state": help_request.state.to_json(),
             }))?)?)
     } else {
         Err(CustomRejection::DidntRequestHelp)
@@ -170,20 +173,22 @@ fn get_help_request(
 }
 
 fn delete_help_request(
-    mut user: User,
-    user_db: &Db<User>,
-    help_requests: &Db<HelpRequest>,
+    user: Archived<User>,
+    user_db: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<String>, CustomRejection> {
-    if let UserType::Senior(Some(id)) = user.user_type {
+    if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
         if help_requests.delete(&id)?.is_none() {
             return Err(CustomRejection::Anyhow(anyhow::Error::msg(
                 "The ID for the help request stored in the server doesn't exist in the database",
             )));
         };
 
-        user.user_type = UserType::Senior(None);
+        let mut user_de = user.to_original();
 
-        user_db.add(&user.username, &user)?;
+        user_de.user_type = UserType::Senior(None);
+
+        user_db.add(&user.username, &user_de)?;
 
         info!(
             "`{}` successfully deleted their help request",

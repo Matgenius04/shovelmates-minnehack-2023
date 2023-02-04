@@ -23,7 +23,13 @@ struct Token<'a> {
 pub fn get_username_from_token_if_valid<'a>(string: &'a Secret<String>) -> Option<&'a str> {
     trace!("Decoding token");
 
-    let token: Token<'a> = serde_json::from_str(string.expose_secret()).ok()?;
+    let token: Token<'a> = match serde_json::from_str(string.expose_secret()) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Error decoding token: {e}");
+            return None;
+        }
+    };
 
     let now = Utc::now().timestamp();
 
@@ -32,7 +38,13 @@ pub fn get_username_from_token_if_valid<'a>(string: &'a Secret<String>) -> Optio
         return None;
     }
 
-    let mut mac_generator = Hmac::<Sha3_256>::new_from_slice(TOKEN_KEY.expose_secret()).ok()?;
+    let mut mac_generator = match Hmac::<Sha3_256>::new_from_slice(TOKEN_KEY.expose_secret()) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("Error generating HMAC: {e}");
+            return None;
+        }
+    };
 
     mac_generator.update(&aad(token.username, token.expiration_time, token.nonce));
 

@@ -4,13 +4,14 @@ use serde_json::json;
 use warp::{hyper::Response, reject, Filter, Rejection};
 
 use crate::{
-    authorization::authorize, db::Db, distance_meters, rejections::CustomRejection, HelpRequest,
-    HelpRequestState, User, UserType,
+    authorization::authorize, db::Archived, distance_meters, rejections::CustomRejection,
+    ArchivedUserType, HelpRequestDB, HelpRequestState, InfallibleDeserialize, User, UserDB,
+    UserType,
 };
 
 fn volunteering_initial_validation(
-    user_db: &Db<User>,
-) -> impl Filter<Extract = (String, User), Error = Rejection> + Clone {
+    user_db: &UserDB,
+) -> impl Filter<Extract = (String, Archived<User>), Error = Rejection> + Clone {
     trace!("Validating request for a help requests endpoint");
 
     let invoker_getter_db = user_db.to_owned();
@@ -24,7 +25,7 @@ fn volunteering_initial_validation(
                     .map_err(|e| reject::custom::<CustomRejection>(e.into()))?
                     .ok_or_else(|| reject::custom(CustomRejection::InvalidToken))?;
 
-                if !matches!(user.user_type, UserType::Volunteer(_)) {
+                if !matches!(user.user_type, ArchivedUserType::Volunteer(_)) {
                     return Err(reject::custom(CustomRejection::NotVolunteer));
                 }
 
@@ -35,8 +36,8 @@ fn volunteering_initial_validation(
 }
 
 pub fn volunteering_filters(
-    user_db: &Db<User>,
-    help_requests: &Db<HelpRequest>,
+    user_db: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> impl Filter<Extract = (Response<String>,), Error = Rejection> + Clone {
     let request_work_requests_db = help_requests.to_owned();
     let request_work_user_db = user_db.to_owned();
@@ -113,9 +114,9 @@ pub fn volunteering_filters(
 }
 
 fn request_work(
-    user: User,
-    help_requests: &Db<HelpRequest>,
-    user_db: &Db<User>,
+    user: Archived<User>,
+    help_requests: &HelpRequestDB,
+    user_db: &UserDB,
 ) -> Result<Response<String>, CustomRejection> {
     let coords = user.location;
 
@@ -149,9 +150,9 @@ struct GetRequestData {
 
 fn get_request(
     id: String,
-    user: User,
-    user_db: &Db<User>,
-    help_requests: &Db<HelpRequest>,
+    user: Archived<User>,
+    user_db: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<String>, CustomRejection> {
     Ok(match help_requests.get(&id)? {
         Some(request) => {
@@ -170,13 +171,13 @@ fn get_request(
                 .status(200)
                 .body(serde_json::to_string(&json!({
                     "user": {
-                        "username": senior.username,
-                        "name": senior.name,
+                        "username": &*senior.username,
+                        "name": &*senior.name,
                     },
-                    "picture": request.picture,
-                    "notes": request.notes,
+                    "picture": &*request.picture,
+                    "notes": &*request.notes,
                     "dist": dist,
-                    "address": senior.address,
+                    "address": &*senior.address,
                 }))?)?
         }
         None => Response::builder()
@@ -187,12 +188,14 @@ fn get_request(
 
 fn accept_request(
     username: String,
-    mut user: User,
+    user: Archived<User>,
     id: String,
-    user_db: &Db<User>,
-    help_requests: &Db<HelpRequest>,
+    user_db: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<String>, CustomRejection> {
-    let mut accepted = match user.user_type {
+    let mut user_de = user.to_original();
+
+    let mut accepted = match user_de.user_type {
         UserType::Volunteer(accepted) => accepted,
         _ => {
             return Err(CustomRejection::Anyhow(anyhow::Error::msg(
@@ -201,24 +204,28 @@ fn accept_request(
         }
     };
 
-    help_requests.update(&id, move |t| {
+    help_requests.update::<rkyv::Infallible, ()>(&id, move |t| {
         t.state = HelpRequestState::AcceptedBy(username.to_owned());
     })?;
 
     accepted.push(id);
 
-    user.user_type = UserType::Volunteer(accepted);
+    user_de.user_type = UserType::Volunteer(accepted);
 
-    user_db.add(&user.username, &user)?;
+    user_db.add(&user.username, &user_de)?;
 
     Ok(Response::builder().status(200).body(String::new())?)
 }
 
-fn accepted_requests(user: User) -> Result<Response<String>, CustomRejection> {
-    match user.user_type {
-        UserType::Volunteer(accepted) => Ok(Response::builder()
-            .status(200)
-            .body(serde_json::to_string(&accepted)?)?),
+fn accepted_requests(user: Archived<User>) -> Result<Response<String>, CustomRejection> {
+    match &user.user_type {
+        ArchivedUserType::Volunteer(accepted) => {
+            Ok(Response::builder()
+                .status(200)
+                .body(serde_json::to_string::<Vec<String>>(
+                    &accepted.deserialize(),
+                )?)?)
+        }
         _ => Err(CustomRejection::Anyhow(anyhow::Error::msg(
             "The user isn't a volunteer, this case should've been filtered earlier",
         ))),
@@ -228,10 +235,10 @@ fn accepted_requests(user: User) -> Result<Response<String>, CustomRejection> {
 fn marking_as_completed(
     username: String,
     id: String,
-    help_requests: &Db<HelpRequest>,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<String>, CustomRejection> {
     Ok(
-        match help_requests.update(&id, |request| {
+        match help_requests.update::<rkyv::Infallible, _>(&id, |request| {
             if let HelpRequestState::AcceptedBy(accepted_by) = &request.state {
                 if &username == accepted_by {
                     request.state = HelpRequestState::MarkedCompletedBy(username.to_owned());
