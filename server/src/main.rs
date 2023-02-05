@@ -169,8 +169,12 @@ async fn main() {
     let get = warp::get().and(warp::fs::dir("../frontend/build"));
     let post = warp::post()
         .and(accounts.or(help_requests).unify().or(volunteering).unify())
-        .map(|v: Result<Response<Body>, Error>| match v {
-            Ok(v) => v,
+        .map(|v: Result<Body, Error>| match v {
+            Ok(v) => Response::builder()
+                .status(200)
+                .body(v)
+                .map_err(|e| Error::from(e).into_response())
+                .unwrap_or_else(|e| e),
             Err(e) => e.into_response(),
         });
 

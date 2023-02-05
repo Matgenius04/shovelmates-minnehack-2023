@@ -2,11 +2,7 @@ use log::{debug, info};
 use secrecy::Secret;
 use serde::Deserialize;
 use serde_json::json;
-use warp::{
-    body::bytes,
-    hyper::{Body, Response},
-    Filter, Rejection,
-};
+use warp::{body::bytes, hyper::Body, Filter, Rejection};
 
 use crate::{
     authorization::{authorize, create_token, hash_password},
@@ -41,7 +37,7 @@ struct LoginInfo {
 
 pub fn accounts_filters(
     db: &UserDB,
-) -> impl Filter<Extract = (Result<Response<Body>, Error>,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (Result<Body, Error>,), Error = Rejection> + Clone {
     let create_account_db = db.to_owned();
     let create_account = warp::path!("api" / "create-account")
         .and(warp::body::json::<CreateAccountInfo>())
@@ -70,10 +66,7 @@ pub fn accounts_filters(
     warp::post().and(create_account.or(login).unify().or(account_info).unify())
 }
 
-fn create_account(
-    db: &UserDB,
-    create_account_info: CreateAccountInfo,
-) -> Result<Response<Body>, Error> {
+fn create_account(db: &UserDB, create_account_info: CreateAccountInfo) -> Result<Body, Error> {
     debug!(
         "Attempting to create an account for {}",
         &create_account_info.username
@@ -110,15 +103,12 @@ fn create_account(
             &create_account_info.username
         );
 
-        Response::builder()
-            .status(200)
-            .body(Body::from(create_token(&create_account_info.username)?))
-            .map_err(|e| Error::from(e).into())
+        Ok(Body::from(create_token(&create_account_info.username)?))
     })
     .map_err(|e| e.into())
 }
 
-fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<Body>, Error> {
+fn login(db: &UserDB, login_info: LoginInfo) -> Result<Body, Error> {
     debug!("Login attempt for {}", &login_info.username);
 
     let user = match db.get(&login_info.username)? {
@@ -134,12 +124,10 @@ fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<Body>, Error> {
 
     info!("{} logged in", &login_info.username);
 
-    Ok(Response::builder()
-        .status(200)
-        .body(Body::from(create_token(&login_info.username)?))?)
+    Ok(Body::from(create_token(&login_info.username)?))
 }
 
-fn get_account_info(username: String, db: &UserDB) -> Result<Response<Body>, Error> {
+fn get_account_info(username: String, db: &UserDB) -> Result<Body, Error> {
     let user = match db.get(&username)? {
         Some(v) => v,
         None => {
@@ -151,13 +139,11 @@ fn get_account_info(username: String, db: &UserDB) -> Result<Response<Body>, Err
 
     info!("{username} requested their user data");
 
-    Ok(Response::builder()
-        .status(200)
-        .body(Body::from(serde_json::to_string(&json!({
-            "username": &*user.username,
-            "name": &*user.name,
-            "address": &*user.address,
-            "location": <(f64, f64) as From<Location>>::from(user.location),
-            "user_type": InfallibleDeserialize::<UserType>::deserialize(&user.user_type),
-        }))?))?)
+    Ok(Body::from(serde_json::to_string(&json!({
+        "username": &*user.username,
+        "name": &*user.name,
+        "address": &*user.address,
+        "location": <(f64, f64) as From<Location>>::from(user.location),
+        "user_type": InfallibleDeserialize::<UserType>::deserialize(&user.user_type),
+    }))?))
 }

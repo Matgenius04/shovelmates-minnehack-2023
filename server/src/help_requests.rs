@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::json;
 use warp::{
     body::bytes,
-    hyper::{body::Bytes, Body, Response},
+    hyper::{body::Bytes, Body},
     Filter, Rejection,
 };
 
@@ -23,8 +23,8 @@ use crate::{
 fn help_request_endpoint(
     bytes: &Bytes,
     user_db: &UserDB,
-    callback: impl FnOnce(&Bytes, String, Archived<User>) -> Result<Response<Body>, Error>,
-) -> Result<Response<Body>, Error> {
+    callback: impl FnOnce(&Bytes, String, Archived<User>) -> Result<Body, Error>,
+) -> Result<Body, Error> {
     trace!("Validating request for a help requests endpoint");
 
     let username = authorize(bytes)?;
@@ -43,7 +43,7 @@ fn help_request_endpoint(
 pub fn help_requests_filters(
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> impl Filter<Extract = (Result<Response<Body>, Error>,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (Result<Body, Error>,), Error = Rejection> + Clone {
     let request_help = warp::path!("api" / "request-help")
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
@@ -85,7 +85,7 @@ fn request_help(
     bytes: &Bytes,
     users: &UserDB,
     help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
+) -> Result<Body, Error> {
     let username = authorize(bytes)?;
     let request_help_info = extract_json::<RequestHelpInfo>(bytes)?;
 
@@ -132,18 +132,12 @@ fn request_help(
                 user.username
             );
 
-            Response::builder()
-                .status(200)
-                .body(Body::empty())
-                .map_err(|e| Error::from(e).into())
+            Ok(Body::empty())
         })
         .map_err(|e| e.into())
 }
 
-fn get_help_request(
-    user: Archived<User>,
-    help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
+fn get_help_request(user: Archived<User>, help_requests: &HelpRequestDB) -> Result<Body, Error> {
     if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
         let help_request = match help_requests.get(id)? {
             Some(v) => v,
@@ -157,14 +151,12 @@ fn get_help_request(
             user.username
         );
 
-        Ok(Response::builder()
-            .status(200)
-            .body(Body::from(serde_json::to_string(&json!({
-                "picture": &*help_request.picture,
-                "notes": &*help_request.notes,
-                "creationTime": help_request.creation_time,
-                "state": help_request.state.to_json(),
-            }))?))?)
+        Ok(Body::from(serde_json::to_string(&json!({
+            "picture": &*help_request.picture,
+            "notes": &*help_request.notes,
+            "creationTime": help_request.creation_time,
+            "state": help_request.state.to_json(),
+        }))?))
     } else {
         Err(Error::DidntRequestHelp)
     }
@@ -174,7 +166,7 @@ fn delete_help_request(
     bytes: &Bytes,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
+) -> Result<Body, Error> {
     let username = authorize(bytes)?;
 
     (user_db, help_requests)
@@ -211,10 +203,7 @@ fn delete_help_request(
                             user.username
                         );
 
-                        Response::builder()
-                            .status(200)
-                            .body(Body::from("Successfully deleted help request"))
-                            .map_err(|e| Error::from(e).into())
+                        Ok(Body::from("Successfully deleted help request"))
                     }
                     ArchivedOption::None => {
                         debug!(
@@ -222,10 +211,7 @@ fn delete_help_request(
                             user.username
                         );
 
-                        Response::builder()
-                            .status(200)
-                            .body(Body::from("There was nothing to delete"))
-                            .map_err(|e| Error::from(e).into())
+                        Ok(Body::from("There was nothing to delete"))
                     }
                 },
                 _ => Err(Error::NotSenior.into()),

@@ -4,7 +4,7 @@ use serde_json::json;
 
 use warp::{
     body::bytes,
-    hyper::{body::Bytes, Body, Response},
+    hyper::{body::Bytes, Body},
     Filter, Rejection,
 };
 
@@ -21,8 +21,8 @@ use crate::{
 fn volunteering_endpoint(
     bytes: &Bytes,
     user_db: &UserDB,
-    callback: impl FnOnce(&Bytes, String, Archived<User>) -> Result<Response<Body>, Error>,
-) -> Result<Response<Body>, Error> {
+    callback: impl FnOnce(&Bytes, String, Archived<User>) -> Result<Body, Error>,
+) -> Result<Body, Error> {
     trace!("Validating request for a help requests endpoint");
 
     let username = authorize(bytes)?;
@@ -41,7 +41,7 @@ fn volunteering_endpoint(
 pub fn volunteering_filters(
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> impl Filter<Extract = (Result<Response<Body>, Error>,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (Result<Body, Error>,), Error = Rejection> + Clone {
     let request_work = warp::path!("api" / "request-work")
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
@@ -113,7 +113,7 @@ fn request_work(
     user: Archived<User>,
     help_requests: &HelpRequestDB,
     user_db: &UserDB,
-) -> Result<Response<Body>, Error> {
+) -> Result<Body, Error> {
     let coords = user.location;
 
     let mut requests = help_requests
@@ -131,14 +131,12 @@ fn request_work(
 
     requests.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).expect("NaN values were filtered"));
 
-    Ok(Response::builder()
-        .status(200)
-        .body(Body::from(serde_json::to_string(
-            match requests.get(0..100) {
-                Some(v) => v,
-                None => &requests,
-            },
-        )?))?)
+    Ok(Body::from(serde_json::to_string(
+        match requests.get(0..100) {
+            Some(v) => v,
+            None => &requests,
+        },
+    )?))
 }
 
 #[derive(Deserialize)]
@@ -151,8 +149,8 @@ fn get_request(
     user: Archived<User>,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
-    Ok(match help_requests.get(&id)? {
+) -> Result<Body, Error> {
+    match help_requests.get(&id)? {
         Some(request) => {
             let senior = match user_db.get(&request.username)? {
                 Some(v) => v,
@@ -165,28 +163,26 @@ fn get_request(
 
             let dist = distance_meters(user.location, senior.location);
 
-            Response::builder()
-                .status(200)
-                .body(Body::from(serde_json::to_string(&json!({
-                    "user": {
-                        "username": &*senior.username,
-                        "name": &*senior.name,
-                    },
-                    "picture": &*request.picture,
-                    "notes": &*request.notes,
-                    "dist": dist,
-                    "address": &*senior.address,
-                }))?))?
+            Ok(Body::from(serde_json::to_string(&json!({
+                "user": {
+                    "username": &*senior.username,
+                    "name": &*senior.name,
+                },
+                "picture": &*request.picture,
+                "notes": &*request.notes,
+                "dist": dist,
+                "address": &*senior.address,
+            }))?))
         }
-        None => return Err(Error::RequestDoesntExist),
-    })
+        None => Err(Error::RequestDoesntExist),
+    }
 }
 
 fn accept_request(
     bytes: &Bytes,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
+) -> Result<Body, Error> {
     let username = authorize(bytes)?;
 
     let id = extract_json::<GetRequestData>(bytes)?.id;
@@ -221,23 +217,16 @@ fn accept_request(
 
             user_db.add(&username, &user)?;
 
-            Response::builder()
-                .status(200)
-                .body(Body::empty())
-                .map_err(|e| Error::from(e).into())
+            Ok(Body::empty())
         })
         .map_err(|e| e.into())
 }
 
-fn accepted_requests(user: Archived<User>) -> Result<Response<Body>, Error> {
+fn accepted_requests(user: Archived<User>) -> Result<Body, Error> {
     match &user.user_type {
-        ArchivedUserType::Volunteer(accepted) => {
-            Ok(Response::builder()
-                .status(200)
-                .body(Body::from(serde_json::to_string::<Vec<String>>(
-                    &accepted.deserialize(),
-                )?))?)
-        }
+        ArchivedUserType::Volunteer(accepted) => Ok(Body::from(serde_json::to_string::<
+            Vec<String>,
+        >(&accepted.deserialize())?)),
         _ => Err(Error::Anyhow(anyhow::Error::msg(
             "The user isn't a volunteer, this case should've been filtered earlier",
         ))),
@@ -248,7 +237,7 @@ fn marking_as_completed(
     username: String,
     id: String,
     help_requests: &HelpRequestDB,
-) -> Result<Response<Body>, Error> {
+) -> Result<Body, Error> {
     help_requests
         .transaction(|requests_db| {
             let mut request = match requests_db.get(&id)? {
@@ -265,10 +254,7 @@ fn marking_as_completed(
 
             requests_db.add(&id, &request)?;
 
-            Response::builder()
-                .status(200)
-                .body(Body::empty())
-                .map_err(|e| Error::from(e).into())
+            Ok(Body::empty())
         })
         .map_err(|e| e.into())
 }
