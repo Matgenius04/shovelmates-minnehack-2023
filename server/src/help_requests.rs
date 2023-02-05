@@ -12,8 +12,12 @@ use warp::{
 };
 
 use crate::{
-    authorization::authorize, clone_dbs, db::Archived, errors::Error, extract_json,
-    ArchivedUserType, HelpRequest, HelpRequestDB, HelpRequestState, User, UserDB, UserType,
+    authorization::authorize,
+    clone_dbs,
+    db::{Archived, Transactional},
+    errors::Error,
+    extract_json, ArchivedUserType, HelpRequest, HelpRequestDB, HelpRequestState, User, UserDB,
+    UserType,
 };
 
 fn help_request_endpoint(
@@ -23,14 +27,11 @@ fn help_request_endpoint(
 ) -> Result<Response<Body>, Error> {
     trace!("Validating request for a help requests endpoint");
 
-    let invoker_getter_db = user_db.to_owned();
-
     let username = authorize(bytes)?;
-    let user_db = invoker_getter_db.to_owned();
 
     let user = user_db
         .get(&username)?
-        .ok_or_else(|| {error!("A token with an incorrect username was generated or someone cracked the tokens somehow"); anyhow::Error::msg("Oofy token")})?;
+        .ok_or_else(|| {error!("A token with an incorrect username was generated or someone cracked the tokens somehow"); Error::msg("Oofy token")})?;
 
     if !matches!(user.user_type, ArchivedUserType::Senior(_)) {
         return Err(Error::NotSenior);
@@ -46,17 +47,7 @@ pub fn help_requests_filters(
     let request_help = warp::path!("api" / "request-help")
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
-        .map(move |bytes, users_db, requests_db| {
-            help_request_endpoint(&bytes, &users_db, |bytes, username, user| {
-                debug!("`{username}` hit request-help endpoint");
-                request_help(
-                    user,
-                    extract_json::<RequestHelpInfo>(bytes)?,
-                    &requests_db,
-                    &users_db,
-                )
-            })
-        });
+        .map(move |bytes, users_db, requests_db| request_help(&bytes, &users_db, &requests_db));
 
     let get_requests = warp::path!("api" / "help-requests")
         .and(bytes())
@@ -72,10 +63,7 @@ pub fn help_requests_filters(
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
         .map(move |bytes, users_db, requests_db| {
-            help_request_endpoint(&bytes, &users_db, |_, username, user| {
-                debug!("`{username}` hit delete-help-request endpoint");
-                delete_help_request(user, &users_db, &requests_db)
-            })
+            delete_help_request(&bytes, &users_db, &requests_db)
         });
 
     warp::post().and(
@@ -94,50 +82,62 @@ struct RequestHelpInfo {
 }
 
 fn request_help(
-    user: Archived<User>,
-    request_help_info: RequestHelpInfo,
-    help_requests: &HelpRequestDB,
+    bytes: &Bytes,
     users: &UserDB,
+    help_requests: &HelpRequestDB,
 ) -> Result<Response<Body>, Error> {
-    if let ArchivedUserType::Senior(ArchivedOption::Some(_)) = &user.user_type {
-        return Err(Error::AlreadyRequestedHelp);
-    }
+    let username = authorize(bytes)?;
+    let request_help_info = extract_json::<RequestHelpInfo>(bytes)?;
 
-    let mut user_de: User = user.to_original();
+    info!("{username} is requesting help");
 
-    let help_request = HelpRequest {
-        picture: request_help_info.picture,
-        notes: request_help_info.notes,
-        creation_time: Utc::now().timestamp_millis(),
-        state: HelpRequestState::Pending,
-        username: user_de.username,
-    };
+    (users, help_requests)
+        .transaction(move |(users_db, requests_db)| {
+            let user = match users_db.get(&username)? {
+                Some(v) => v,
+                None => {
+                    return Err(
+                        Error::msg("There exists a token for a user that doesn't exist").into(),
+                    )
+                }
+            };
 
-    let mut id;
+            if let ArchivedUserType::Senior(ArchivedOption::Some(_)) = &user.user_type {
+                return Err(Error::AlreadyRequestedHelp.into());
+            }
 
-    loop {
-        id = URL_SAFE.encode(rand::random::<[u8; 32]>());
+            let mut user_de: User = user.to_original();
 
-        if !help_requests.contains(&id)? {
-            break;
-        }
-    }
+            let help_request = HelpRequest {
+                picture: request_help_info.picture.to_owned(),
+                notes: request_help_info.notes.to_owned(),
+                creation_time: Utc::now().timestamp_millis(),
+                state: HelpRequestState::Pending,
+                username: user_de.username,
+            };
 
-    help_requests.add(&id, &help_request)?;
+            let id = URL_SAFE.encode(requests_db.generate_id()?.to_le_bytes());
 
-    // Transfer ownership back
-    user_de.username = help_request.username;
+            requests_db.add(&id, &help_request)?;
 
-    user_de.user_type = UserType::Senior(Some(id));
+            // Transfer ownership back
+            user_de.username = help_request.username;
 
-    users.add(&user.username, &user_de)?;
+            user_de.user_type = UserType::Senior(Some(id));
 
-    info!(
-        "`{}` successfully created a request for help",
-        user.username
-    );
+            users_db.add(&user.username, &user_de)?;
 
-    Ok(Response::builder().status(200).body(Body::empty())?)
+            info!(
+                "`{}` successfully created a request for help",
+                user.username
+            );
+
+            Response::builder()
+                .status(200)
+                .body(Body::empty())
+                .map_err(|e| Error::from(e).into())
+        })
+        .map_err(|e| e.into())
 }
 
 fn get_help_request(
@@ -145,11 +145,11 @@ fn get_help_request(
     help_requests: &HelpRequestDB,
 ) -> Result<Response<Body>, Error> {
     if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
-        let help_request = match help_requests.get(&id)? {
+        let help_request = match help_requests.get(id)? {
             Some(v) => v,
-            None => return Err(Error::Anyhow(anyhow::Error::msg(
+            None => return Err(Error::msg(
                 "The ID for the help request stored in the server doesn't exist in the database",
-            ))),
+            )),
         };
 
         debug!(
@@ -171,39 +171,65 @@ fn get_help_request(
 }
 
 fn delete_help_request(
-    user: Archived<User>,
+    bytes: &Bytes,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
 ) -> Result<Response<Body>, Error> {
-    if let ArchivedUserType::Senior(ArchivedOption::Some(id)) = &user.user_type {
-        if help_requests.delete(&id)?.is_none() {
-            return Err(Error::Anyhow(anyhow::Error::msg(
-                "The ID for the help request stored in the server doesn't exist in the database",
-            )));
-        };
+    let username = authorize(bytes)?;
 
-        let mut user_de = user.to_original();
+    (user_db, help_requests)
+        .transaction(|(users_db, requests_db)| {
+            debug!("`{username}` hit delete-help-request endpoint");
 
-        user_de.user_type = UserType::Senior(None);
+            let user = match users_db.get(&username)? {
+                Some(v) => v,
+                None => {
+                    return Err(Error::msg(
+                        "There exists a token for a username that doesn't exist",
+                    )
+                    .into())
+                }
+            };
 
-        user_db.add(&user.username, &user_de)?;
+            match &user.user_type {
+                ArchivedUserType::Senior(maybe_id) => match maybe_id {
+                    ArchivedOption::Some(id) => {
+                        if requests_db.delete(id)?.is_none() {
+                            return Err(Error::msg(
+                                "The ID for the help request stored in the server doesn't exist in the database",
+                            ).into());
+                        };
 
-        info!(
-            "`{}` successfully deleted their help request",
-            user.username
-        );
+                        let mut user_de = user.to_original();
 
-        return Ok(Response::builder()
-            .status(200)
-            .body(Body::from("Successfully deleted help request"))?);
-    }
+                        user_de.user_type = UserType::Senior(None);
 
-    debug!(
-        "`{}` tried to delete their help request but there was nothing to delete",
-        user.username
-    );
+                        users_db.add(&user.username, &user_de)?;
 
-    Ok(Response::builder()
-        .status(200)
-        .body(Body::from("There was nothing to delete"))?)
+                        info!(
+                            "`{}` successfully deleted their help request",
+                            user.username
+                        );
+
+                        Response::builder()
+                            .status(200)
+                            .body(Body::from("Successfully deleted help request"))
+                            .map_err(|e| Error::from(e).into())
+                    }
+                    ArchivedOption::None => {
+                        debug!(
+                            "`{}` tried to delete their help request but there was nothing to delete",
+                            user.username
+                        );
+
+                        Response::builder()
+                            .status(200)
+                            .body(Body::from("There was nothing to delete"))
+                            .map_err(|e| Error::from(e).into())
+                    }
+                },
+                _ => Err(Error::NotSenior.into()),
+            }
+        })
+        .map_err(|e| e.into())
 }

@@ -1,8 +1,11 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt};
 
 use log::{debug, error, info, trace, warn};
 
+use anyhow::anyhow;
+use sled::transaction::{ConflictableTransactionError, TransactionError};
 use warp::{
+    http,
     hyper::{Body, Response, StatusCode},
     Reply,
 };
@@ -17,16 +20,52 @@ pub enum Error {
     NotVolunteer,
     AlreadyRequestedHelp,
     DidntRequestHelp,
-    JSON(serde_json::Error),
+    RequestDoesntExist,
+    RequestNotAcceptedByUser,
+    Json(serde_json::Error),
     Anyhow(anyhow::Error),
 }
 
-impl<T> From<T> for Error
-where
-    anyhow::Error: From<T>,
-{
-    fn from(val: T) -> Error {
-        Error::Anyhow(anyhow::Error::from(val))
+impl Error {
+    pub fn unexpected<E>(e: E) -> Error
+    where
+        anyhow::Error: From<E>,
+    {
+        Error::Anyhow(e.into())
+    }
+
+    pub fn msg<M>(m: M) -> Error
+    where
+        M: fmt::Display + fmt::Debug + Send + Sync + 'static,
+    {
+        Error::unexpected(anyhow::Error::msg(m))
+    }
+}
+
+impl From<Error> for ConflictableTransactionError<Error> {
+    fn from(value: Error) -> Self {
+        ConflictableTransactionError::Abort(value)
+    }
+}
+
+impl From<TransactionError<Error>> for Error {
+    fn from(value: TransactionError<Error>) -> Self {
+        match value {
+            TransactionError::Abort(e) => e,
+            TransactionError::Storage(e) => Error::Anyhow(anyhow!(e)),
+        }
+    }
+}
+
+impl From<http::Error> for Error {
+    fn from(value: http::Error) -> Self {
+        Error::unexpected(value)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        Error::unexpected(value)
     }
 }
 
@@ -51,7 +90,9 @@ impl Error {
             }
             AlreadyRequestedHelp => "You already requested help".into(),
             DidntRequestHelp => "You never requested help".into(),
-            JSON(e) => format!("Failed to decode body: {e}").into(),
+            RequestDoesntExist => "That request doesn't exist".into(),
+            RequestNotAcceptedByUser => "That request wasn't accepted by the user".into(),
+            Json(e) => format!("Failed to decode body: {e}").into(),
             Anyhow(e) => format!("Unexpected server error: {e}").into(),
         }
     }
@@ -68,7 +109,9 @@ impl Error {
             NotVolunteer => StatusCode::METHOD_NOT_ALLOWED,
             AlreadyRequestedHelp => StatusCode::CONFLICT,
             DidntRequestHelp => StatusCode::CONFLICT,
-            JSON(_) => StatusCode::BAD_REQUEST,
+            RequestDoesntExist => StatusCode::CONFLICT,
+            RequestNotAcceptedByUser => StatusCode::CONFLICT,
+            Json(_) => StatusCode::BAD_REQUEST,
             Anyhow(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -79,8 +122,10 @@ impl Error {
         match self {
             Anyhow(_) => error!("{}", self.description()),
             InvalidToken | IncorrectPassword(_) => warn!("{}", self.description()),
-            NotSenior | NotVolunteer => info!("{}", self.description()),
-            JSON(_) => debug!("{}", self.description()),
+            NotSenior | NotVolunteer | RequestDoesntExist | RequestNotAcceptedByUser => {
+                info!("{}", self.description())
+            }
+            Json(_) => debug!("{}", self.description()),
             UsernameAlreadyExists(_)
             | UsernameDoesntExist(_)
             | AlreadyRequestedHelp

@@ -10,6 +10,7 @@ use warp::{
 
 use crate::{
     authorization::{authorize, create_token, hash_password},
+    db::Transactional,
     errors::Error,
     InfallibleDeserialize, Location, User, UserDB, UserType,
 };
@@ -78,37 +79,43 @@ fn create_account(
         &create_account_info.username
     );
 
-    if db.contains(&create_account_info.username)? {
-        return Err(Error::UsernameAlreadyExists(create_account_info.username));
-    }
+    db.transaction(move |db| {
+        if db.get(&create_account_info.username)?.is_some() {
+            return Err(
+                Error::UsernameAlreadyExists(create_account_info.username.to_owned()).into(),
+            );
+        }
 
-    let salt = rand::random::<[u8; 32]>();
+        let salt = rand::random::<[u8; 32]>();
 
-    let password_hash = hash_password(&create_account_info.password, salt);
+        let password_hash = hash_password(&create_account_info.password, salt);
 
-    let user = User {
-        username: create_account_info.username.to_owned(),
-        name: create_account_info.name,
-        address: create_account_info.address,
-        location: create_account_info.location.into(),
-        user_type: match create_account_info.user_type {
-            UserTypeChoice::Volunteer => UserType::Volunteer(Vec::new()),
-            UserTypeChoice::Senior => UserType::Senior(None),
-        },
-        salt,
-        password_hash,
-    };
+        let user = User {
+            username: create_account_info.username.to_owned(),
+            name: create_account_info.name.to_owned(),
+            address: create_account_info.address.to_owned(),
+            location: create_account_info.location.into(),
+            user_type: match create_account_info.user_type {
+                UserTypeChoice::Volunteer => UserType::Volunteer(Vec::new()),
+                UserTypeChoice::Senior => UserType::Senior(None),
+            },
+            salt,
+            password_hash,
+        };
 
-    db.add(&user.name, &user)?;
+        db.add(&user.name, &user)?;
 
-    info!(
-        "Created a new account for {}",
-        &create_account_info.username
-    );
+        info!(
+            "Created a new account for {}",
+            &create_account_info.username
+        );
 
-    Ok(Response::builder()
-        .status(200)
-        .body(Body::from(create_token(&create_account_info.username)?))?)
+        Response::builder()
+            .status(200)
+            .body(Body::from(create_token(&create_account_info.username)?))
+            .map_err(|e| Error::from(e).into())
+    })
+    .map_err(|e| e.into())
 }
 
 fn login(db: &UserDB, login_info: LoginInfo) -> Result<Response<Body>, Error> {

@@ -56,7 +56,7 @@ pub fn get_username_from_token_if_valid<'a>(string: &'a Secret<String>) -> Optio
     Some(token.username)
 }
 
-pub fn create_token(username: &str) -> Result<String, anyhow::Error> {
+pub fn create_token(username: &str) -> Result<String, Error> {
     trace!("Creating a token for {username}");
 
     // Let them last a day
@@ -64,16 +64,18 @@ pub fn create_token(username: &str) -> Result<String, anyhow::Error> {
 
     let nonce: [u8; 12] = rand::random();
 
-    let mut mac_generator = Hmac::<Sha3_256>::new_from_slice(TOKEN_KEY.expose_secret())?;
+    let mut mac_generator =
+        Hmac::<Sha3_256>::new_from_slice(TOKEN_KEY.expose_secret()).map_err(Error::unexpected)?;
 
     mac_generator.update(&aad(username, expiration_time, nonce));
 
-    Ok(serde_json::to_string(&Token {
+    serde_json::to_string(&Token {
         username,
         expiration_time,
         nonce,
         mac: mac_generator.finalize().into_bytes().to_vec(),
-    })?)
+    })
+    .map_err(Error::unexpected)
 }
 
 fn aad(username: &str, expiration_time: i64, nonce: [u8; 12]) -> Vec<u8> {

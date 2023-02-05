@@ -1,6 +1,7 @@
 use log::{debug, error, trace};
 use serde::Deserialize;
 use serde_json::json;
+
 use warp::{
     body::bytes,
     hyper::{body::Bytes, Body, Response},
@@ -8,7 +9,11 @@ use warp::{
 };
 
 use crate::{
-    authorization::authorize, clone, clone_dbs, db::Archived, distance_meters, errors::Error,
+    authorization::authorize,
+    clone, clone_dbs,
+    db::{Archived, Transactional},
+    distance_meters,
+    errors::Error,
     extract_json, ArchivedUserType, HelpRequestDB, HelpRequestState, InfallibleDeserialize, User,
     UserDB, UserType,
 };
@@ -20,14 +25,11 @@ fn volunteering_endpoint(
 ) -> Result<Response<Body>, Error> {
     trace!("Validating request for a help requests endpoint");
 
-    let invoker_getter_db = user_db.to_owned();
-
     let username = authorize(bytes)?;
-    let user_db = invoker_getter_db.to_owned();
 
     let user = user_db
         .get(&username)?
-        .ok_or_else(|| {error!("A token with an incorrect username was generated or someone cracked the tokens somehow"); anyhow::Error::msg("Oofy token")})?;
+        .ok_or_else(|| {error!("A token with an incorrect username was generated or someone cracked the tokens somehow"); Error::msg("Oofy token")})?;
 
     if !matches!(user.user_type, ArchivedUserType::Volunteer(_)) {
         return Err(Error::NotVolunteer);
@@ -68,18 +70,7 @@ pub fn volunteering_filters(
     let accept_request = warp::path!("api" / "get-request")
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
-        .map(move |bytes, users_db, requests_db| {
-            volunteering_endpoint(&bytes, &users_db, |bytes, username, user| {
-                debug!("{username} is getting a request");
-                accept_request(
-                    username,
-                    user,
-                    extract_json::<GetRequestData>(bytes)?.id,
-                    &users_db,
-                    &requests_db,
-                )
-            })
-        });
+        .map(move |bytes, users_db, requests_db| accept_request(&bytes, &users_db, &requests_db));
 
     let accepted_requests = warp::path!("api" / "accepted-requests")
         .and(bytes())
@@ -136,7 +127,7 @@ fn request_work(
             Ok((dist, _)) => !dist.is_nan(),
             Err(_) => true,
         })
-        .collect::<Result<Vec<_>, anyhow::Error>>()?;
+        .collect::<Result<Vec<_>, Error>>()?;
 
     requests.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).expect("NaN values were filtered"));
 
@@ -187,41 +178,55 @@ fn get_request(
                     "address": &*senior.address,
                 }))?))?
         }
-        None => Response::builder()
-            .status(409)
-            .body(Body::from("That request doesn't exist"))?,
+        None => return Err(Error::RequestDoesntExist),
     })
 }
 
 fn accept_request(
-    username: String,
-    user: Archived<User>,
-    id: String,
+    bytes: &Bytes,
     user_db: &UserDB,
     help_requests: &HelpRequestDB,
 ) -> Result<Response<Body>, Error> {
-    let mut user_de = user.to_original();
+    let username = authorize(bytes)?;
 
-    let mut accepted = match user_de.user_type {
-        UserType::Volunteer(accepted) => accepted,
-        _ => {
-            return Err(Error::Anyhow(anyhow::Error::msg(
-                "The user isn't a volunteer, this case should've been filtered earlier",
-            )))
-        }
-    };
+    let id = extract_json::<GetRequestData>(bytes)?.id;
 
-    help_requests.update::<rkyv::Infallible, ()>(&id, move |t| {
-        t.state = HelpRequestState::AcceptedBy(username.to_owned());
-    })?;
+    debug!("{username} is accepting a request");
 
-    accepted.push(id);
+    (user_db, help_requests)
+        .transaction(move |(user_db, requests_db)| {
+            let mut user = user_db
+                .get(&username)?
+                .ok_or_else(|| Error::msg("There exists a token for a user that doesn't exist"))?
+                .to_original();
 
-    user_de.user_type = UserType::Volunteer(accepted);
+            let mut accepted = match user.user_type {
+                UserType::Volunteer(accepted) => accepted,
+                _ => return Err(Error::NotVolunteer.into()),
+            };
 
-    user_db.add(&user.username, &user_de)?;
+            let mut help_request = match help_requests.get(&id)? {
+                Some(v) => v,
+                None => return Err(Error::RequestDoesntExist.into()),
+            }
+            .to_original();
 
-    Ok(Response::builder().status(200).body(Body::empty())?)
+            help_request.state = HelpRequestState::AcceptedBy(username.to_owned());
+
+            requests_db.add(&id, &help_request)?;
+
+            accepted.push(id.to_owned());
+
+            user.user_type = UserType::Volunteer(accepted);
+
+            user_db.add(&username, &user)?;
+
+            Response::builder()
+                .status(200)
+                .body(Body::empty())
+                .map_err(|e| Error::from(e).into())
+        })
+        .map_err(|e| e.into())
 }
 
 fn accepted_requests(user: Archived<User>) -> Result<Response<Body>, Error> {
@@ -244,24 +249,26 @@ fn marking_as_completed(
     id: String,
     help_requests: &HelpRequestDB,
 ) -> Result<Response<Body>, Error> {
-    Ok(
-        match help_requests.update::<rkyv::Infallible, _>(&id, |request| {
-            if let HelpRequestState::AcceptedBy(accepted_by) = &request.state {
-                if &username == accepted_by {
-                    request.state = HelpRequestState::MarkedCompletedBy(username.to_owned());
+    help_requests
+        .transaction(|requests_db| {
+            let mut request = match requests_db.get(&id)? {
+                Some(v) => v.to_original(),
+                None => return Err(Error::RequestDoesntExist.into()),
+            };
 
-                    return Response::builder().status(200).body(Body::empty());
+            match request.state {
+                HelpRequestState::AcceptedBy(accepted_by) if username == accepted_by => {
+                    request.state = HelpRequestState::MarkedCompletedBy(accepted_by);
                 }
+                _ => return Err(Error::RequestNotAcceptedByUser.into()),
             }
 
-            return Response::builder()
-                .status(409)
-                .body(Body::from("The id wasn't accepted by the user"));
-        })? {
-            Some(v) => v?,
-            None => Response::builder()
-                .status(409)
-                .body(Body::from("The id doesn't exist"))?,
-        },
-    )
+            requests_db.add(&id, &request)?;
+
+            Response::builder()
+                .status(200)
+                .body(Body::empty())
+                .map_err(|e| Error::from(e).into())
+        })
+        .map_err(|e| e.into())
 }

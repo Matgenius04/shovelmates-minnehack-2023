@@ -102,17 +102,13 @@ pub fn distance_meters(coord1: Location, coord2: Location) -> f64 {
 }
 
 impl HelpRequest {
-    pub fn get_user(&self, user_db: &UserDB) -> Result<Archived<User>, anyhow::Error> {
+    pub fn get_user(&self, user_db: &UserDB) -> Result<Archived<User>, Error> {
         user_db.get(&self.username)?.ok_or_else(|| {
-            anyhow::Error::msg("The username in the help request doesn't exist in the database")
+            Error::msg("The username in the help request doesn't exist in the database")
         })
     }
 
-    pub fn distance_meters(
-        &self,
-        coordinates: Location,
-        user_db: &UserDB,
-    ) -> Result<f64, anyhow::Error> {
+    pub fn distance_meters(&self, coordinates: Location, user_db: &UserDB) -> Result<f64, Error> {
         let senior = self.get_user(user_db)?;
         let senior_coord = senior.location;
 
@@ -121,17 +117,13 @@ impl HelpRequest {
 }
 
 impl ArchivedHelpRequest {
-    pub fn get_user(&self, user_db: &UserDB) -> Result<Archived<User>, anyhow::Error> {
+    pub fn get_user(&self, user_db: &UserDB) -> Result<Archived<User>, Error> {
         user_db.get(&self.username)?.ok_or_else(|| {
-            anyhow::Error::msg("The username in the help request doesn't exist in the database")
+            Error::msg("The username in the help request doesn't exist in the database")
         })
     }
 
-    pub fn distance_meters(
-        &self,
-        coordinates: Location,
-        user_db: &UserDB,
-    ) -> Result<f64, anyhow::Error> {
+    pub fn distance_meters(&self, coordinates: Location, user_db: &UserDB) -> Result<f64, Error> {
         let senior = self.get_user(user_db)?;
         let senior_coord = senior.location;
 
@@ -148,7 +140,7 @@ trait InfallibleDeserialize<T>: RkyvDeserialize<T, rkyv::Infallible> {
 impl<V, T: RkyvDeserialize<V, rkyv::Infallible>> InfallibleDeserialize<V> for T {}
 
 pub fn extract_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, Error> {
-    serde_json::from_slice(bytes.as_ref()).map_err(|e| Error::JSON(e))
+    serde_json::from_slice(bytes.as_ref()).map_err(Error::Json)
 }
 
 pub fn clone<V: Clone + Send>(v: V) -> impl Filter<Extract = (V,), Error = Infallible> + Clone {
