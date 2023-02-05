@@ -5,10 +5,12 @@ import { alert, confirm } from '@nativescript/core/ui/dialogs'
 
 import Splash from "~/pages/Splash.svelte";
 
-const serverURL = "http://10.0.2.2:8080"
+const serverURL = "http://10.0.2.2:8080" // android
+// const serverURL = "http://0.0.0.0:8080" // ios
 
-export const stateList: String[] = ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","District of Columbia","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming"]
-export type State = typeof stateList[number];
+export const stateList: Record<string, string> = {"AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"}
+export const stateAbbreviations = Object.keys(stateList)
+export type State = typeof stateAbbreviations[number]
 export type UserType = "Senior" | "Volunteer";
 export type User = {
   username: string,
@@ -176,20 +178,21 @@ const parseRequestImage = async (json: {picture:string}): Promise<any> => {
 const getAuthorizationString = () : string => {
   const authorizationString = ApplicationSettings.getString("AuthorizationString")
   console.log(authorizationString);
+  let parsed: {expirationTime: Number};
   try {
-    const parsed = JSON.parse(authorizationString)
-    if (Date.now() > parsed.expirationTime) {
-      navigate({page: Splash})
-      throw "Authorization Token Expired"
-    }
-    if (authorizationString == "") {
-      navigate({page: Splash})
-      throw "No Authorization String Found"
-    }
-    return authorizationString
+    parsed = JSON.parse(authorizationString)
   } catch {
     throw "Inavalid authorization token";
   }
+  if (Date.now() < parsed.expirationTime) {
+    navigate({page: Splash})
+    throw "Authorization Token Expired"
+  }
+  if (authorizationString == "") {
+    navigate({page: Splash})
+    throw "No Authorization String Found"
+  }
+  return authorizationString
 }
 export const createAccount = async (user: UserSignup) : Promise<LoginResult> => {
   console.log(user);
@@ -217,19 +220,23 @@ export const createAccount = async (user: UserSignup) : Promise<LoginResult> => 
 export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> => {
   const res = await fetch(`${serverURL}/api/login`, {
     method: "POST",
+    mode: 'cors',
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify(loginInfo)
   })
   if (res.status == 409) return LoginResult.usernameError;
   if (res.status == 403) return LoginResult.passwordError;
-  if (res.ok) return LoginResult.success;
-  return LoginResult.unknownError
+  if (!res.ok) return LoginResult.unknownError;
+  ApplicationSettings.setString("AuthorizationString", await res.text());
+  return LoginResult.success
 }
 export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpRequestResult> => {
   await console.log({authorization: getAuthorizationString()})
-  const res = await fetch(`${serverURL}/request-help`, {
+  const res = await fetch(`${serverURL}/api/request-help`, {
     method: "POST",
     mode: 'cors',
-    body: JSON.stringify({...helpRequest, authorization: getAuthorizationString()})
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({authorization: getAuthorizationString(), ...helpRequest})
   })
   if (res.status == 405) return HelpRequestResult.notSenior
   if (!res.ok) return HelpRequestResult.unknownError
@@ -238,6 +245,8 @@ export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpReques
 export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestResult> => {
   const res = await fetch(`${serverURL}/help-requests`, {
     method: "POST",
+    mode: 'cors',
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
   if (res.status == 409) return SelfRequestError.nonexistentError
@@ -247,6 +256,8 @@ export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestR
 export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestError> => {
   const res = await fetch(`${serverURL}/request-work`, {
     method: "POST",
+    mode: 'cors',
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
   if (res.status == 405) return WorkRequestError.notVolunteer
@@ -256,6 +267,8 @@ export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestEr
 export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequestByIDResult | WorkRequestError> => {
   const res = await fetch(`${serverURL}/help-requests`, {
     method: "POST",
+    mode: 'cors',
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({...id, authorization: getAuthorizationString()})
   })
   if (res.status == 405) return WorkRequestError.notVolunteer
@@ -265,9 +278,9 @@ export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequ
 export const getUserData = async (): Promise<UserData> => {
   console.log("bruh")
   const res = await fetch(`${serverURL}/api/user-data`, {
+    method: "POST",
     mode: "cors",
     headers: {"Content-Type": "application/json"},
-    method: "POST",
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
   console.log("bruh")
