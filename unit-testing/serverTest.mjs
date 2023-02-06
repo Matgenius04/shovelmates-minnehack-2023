@@ -1,14 +1,18 @@
 // for colored chalk support, run
 
 import { readFile } from 'fs/promises'
+import { argv } from 'process'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import chalk from 'chalk'
 
 const serverURL = "http://0.0.0.0:8080"
-// const exampleUserCreateRequest = 
 
-const allUserInfo = {
+// shows request data sent to api
+const extraDebug = argv[2] == 'debug';
+const showServerResponse = extraDebug || argv[2] == 'response';
+
+const allUserInfoSenior = {
   username: "Username",
   password: "Password",
   name: "Full Name",
@@ -20,6 +24,19 @@ const allUserInfo = {
     zip: "55403",
   },
   userType: "Senior"
+}
+const allUserInfoVolunteer = {
+  username: "exampleUser",
+  password: "verysecure123",
+  name: "Jane Doe",
+  address: {
+    line1: "1600 Amphitheatre Parkway",
+    line2: undefined,
+    city: "Mountain View",
+    state: "CA",
+    zip: "94043",
+  },
+  userType: "Volunteer"
 }
 const helpRequest = {
   picture: (await readFile(join(dirname(fileURLToPath(import.meta.url)),"../frontend/app/assets/logo.png"))).toString('base64url'),
@@ -48,15 +65,21 @@ const addressToLonLat = async (address) => {
   if (!lonLat[0] || !lonLat[1]) throw "Uh oh. Address request didn't yield a lon lat....";
   return lonLat.map(v=>Number(v));
 }
-const apiFetchPost = async (endpoint, body) => {
+const apiFetchPost = async (endpoint, body, statusErrors={}) => {
   const res = await fetch(`${serverURL}/api/${endpoint}`, {
     method: "POST",
     mode: "cors",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(body)
   })
-  if (!res.ok) throw res.status + " Error"
-  return res;
+  const outText = await res.text();
+  if (extraDebug) console.error(`\nData sent to ${endpoint}: ${chalk.yellow(JSON.stringify(body, null, 2))}\n`)
+  if (showServerResponse) console.error(`Server response: ${chalk.cyanBright(outText)}`)
+  if (!res.ok) {
+    if (statusErrors[res.status]) throw statusErrors[res.status]
+    throw res.status + " Error"
+  }
+  return {...res, text:()=>outText, json:()=>{try {return JSON.parse(outText)} catch {throw "Invalid JSON Server Response"}}};
 }
 const concatAddress = async (address) => {
   return `${address.line1?.trim()}
@@ -74,6 +97,8 @@ const createAccount = async (user) => {
       location,
       userType: user.userType,
       password: user.password
+  }, {
+    '409': "username error"
   })
   authorizationString = await res.text()
   return res;
@@ -82,57 +107,88 @@ const login = async (user) => {
   const res = await apiFetchPost("login",{
     username: user.username, 
     password: user.password
+  }, {
+    '409': 'username error',
+    '403': 'password error'
   })
   authorizationString = await res.text()
   return res.json();
 }
 const getUserData = async () => {
   const res = await apiFetchPost("user-data", {authorization: authorizationString})
-  if (!res.ok) throw "User data not found";
   return res.json()
 }
 const requestHelp = async (helpRequest) => {
-  const res = await fetch("request-help", {authorization: authorizationString, ...helpRequest})
-  if (res.status == 405) throw "Not Senior"
-  if (!res.ok) throw "Unknown Error"
-  return true;
+  const res = await apiFetchPost("request-help", {authorization: authorizationString, ...helpRequest}, {
+    '405': "Not Senior Error"
+  })
+  return res.json()
+}
+const getSelfRequest = async () => {
+  const res = await apiFetchPost(`help-requests`, {authorization: authorizationString}, {
+    '409': "No Requests Exist Error"
+  })
+  return res.json()
+}
+const requestWork = async () => {
+  const res = await apiFetchPost("request-work", {authorization: authorizationString}, {
+    '405': "Not Volunteer Error"
+  })
+  return res.json()
+}
+
+
+const test = async (testFunction, testName, flip = false) => {
+  try {
+    await testFunction()
+    if (flip) {
+      console.error(chalk.red(`${testName} Test Failed`))
+    } else {
+      console.log(chalk.green(`${testName} Test Succeeded`))
+    }
+  } catch (e) {
+    if (flip) {
+      console.log(chalk.green(`${testName} Test Succeeded`))
+    } else {
+      console.error(`${chalk.red(`${testName} Test Failed:`)} ${e}`)
+    }
+  }
+  if (extraDebug || showServerResponse) await console.log("-".repeat(40))
+  else await null;
 }
 
 
 
 // TESTS
-// create account test
-try {
-  await createAccount(allUserInfo)
-  console.log("Account Creation Succeeded")
-  console.log(`\nAuthorization String: ${authorizationString}\n`)
-} catch (e) {
-  console.error(`Account Creation Failed: ${e}`)
-}
-try {
-  await createAccount(allUserInfo)
-  console.error(chalk.red("Duplicate Account Creation Test Failed"))
-} catch (e) {
-  console.log("Duplicate Account Creation Test Succeeded")
-}
+// create senior account test
+await test((async ()=>{
+  await createAccount(allUserInfoSenior)
+  await console.log(`Authorization String: ${authorizationString}\n`)
+}),"Senior Account Creation")
+
+// create account duplication test
+await test(createAccount.bind(this,allUserInfoSenior),"Duplicate Account Creation", true)
+
 // login account test
-try {
-  await login(allUserInfo)
-  console.log("Login Succeeded")
-} catch (e) {
-  console.error(`${chalk.red("Login Failed")}: ${e}`)
-}
+await test(login.bind(this, allUserInfoSenior), "Login")
+
 // get user data test
-try {
-  console.log(await getUserData(allUserInfo))
-  console.log("User Data Request Succeeded")
-} catch (e) {
-  console.error(`${chalk.red("User Data Request Failed")}: ${e}`)
-}
+await test (getUserData, "Get User Data")
+
 // request help test (as senior)
-try {
-  await requestHelp(helpRequest)
-  console.log("Senior Help Request Succeeded")
-} catch (e) {
-  console.error(`${chalk.red("Senior Help Request Failed")}: ${e}`)
-}
+await test (requestHelp.bind(this, helpRequest), "Senior Help Request")
+
+// get request made (as senior)
+await test (getSelfRequest, "Senior Get Self Request")
+
+if (!extraDebug && !showServerResponse) console.log()
+authorizationString = ""
+// create volunteer account test
+await test((async ()=>{
+  await createAccount(allUserInfoVolunteer)
+  await console.log(`Authorization String: ${authorizationString}\n`)
+}),"Volunteer Account Creation")
+// get volunteer user data test
+await test(getUserData, "Get User Data")
+// request work (as volunteer)
+await test(requestWork, "Volunteer Request Work")
