@@ -134,11 +134,12 @@ export const checkIfAddressFilledIn = (address: Address) : FilledAddress | Promi
 
 const addressToLonLat = async (address: FilledAddress) : Promise<[Number, Number] | LonLatRequestError> => {
   console.log("running address -> lon lat request")
+  console.error(stateList[address.state])
   
   const res = await fetch(
     // `https://nominatim.openstreetmap.org/search?street=${address.line1}&city=${address.city}&state=${address.state}&postalcode=${address.zip}&format=geocodejson&countrycodes=us`, 
     // `https://nominatim.openstreetmap.org/search?q=${address.line1}, ${address.city}, ${address.state}&format=geocodejson&countrycodes=us`, 
-    `https://nominatim.openstreetmap.org/search?addressdetails=1&q=${address.line1}, ${address.city}, ${address.state}&format=jsonv2&countrycodes=us&limit=1`, 
+    `https://nominatim.openstreetmap.org/search?addressdetails=1&q=${address.line1}, ${address.city}, ${stateList[address.state]}&format=jsonv2&countrycodes=us&limit=1`, 
     {
     method: "GET",
     headers: {
@@ -231,7 +232,7 @@ export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> =
   return LoginResult.success
 }
 export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpRequestResult> => {
-  await console.log({authorization: getAuthorizationString()})
+  await console.log(JSON.stringify({authorization: getAuthorizationString()}))
   const res = await fetch(`${serverURL}/api/request-help`, {
     method: "POST",
     mode: 'cors',

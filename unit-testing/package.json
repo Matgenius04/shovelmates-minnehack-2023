@@ -1,0 +1,14 @@
+{
+  "name": "unit-testing",
+  "version": "1.0.0",
+  "description": "Unit Testing for Shovelmates",
+  "main": "serverTest.mjs",
+  "scripts": {
+    "apitest": "node serverTest.mjs"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.2.0"
+  }
+}

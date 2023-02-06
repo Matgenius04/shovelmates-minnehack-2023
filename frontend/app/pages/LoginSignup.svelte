@@ -29,7 +29,7 @@
       line1: "511 Kenwood Pkwy",
       line2: undefined,
       city: "Minneapolis",
-      state: "Minnesota",
+      state: "MN",
       zip: "55403",
     },
     userType: UserType = "Senior";
