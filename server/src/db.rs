@@ -69,9 +69,9 @@ where
         Archived::try_new(bytes, PhantomData, |bytes| {
             let len = bytes.len();
             let hash = bytes
-                .get((len - 256)..len)
+                .get((len - 32)..len)
                 .ok_or_else(|| Error::msg("The data in storage is too short to contain a hash"))?;
-            let data = bytes.get(0..(len - 264)).ok_or_else(|| {
+            let data = bytes.get(0..(len - 32)).ok_or_else(|| {
                 Error::msg("The data in storage is too short to contain the data")
             })?;
 

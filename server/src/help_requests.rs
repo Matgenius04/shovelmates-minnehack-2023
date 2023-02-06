@@ -132,7 +132,7 @@ fn request_help(
                 user.username
             );
 
-            Ok(Body::empty())
+            Ok(Body::from("{}"))
         })
         .map_err(|e| e.into())
 }

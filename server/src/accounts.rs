@@ -96,7 +96,7 @@ fn create_account(db: &UserDB, create_account_info: CreateAccountInfo) -> Result
             password_hash,
         };
 
-        db.add(&user.name, &user)?;
+        db.add(&user.username, &user)?;
 
         info!(
             "Created a new account for {}",
