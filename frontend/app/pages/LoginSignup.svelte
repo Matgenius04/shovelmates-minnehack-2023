@@ -50,9 +50,10 @@
         return generateErrorDialog("Password Incorrect");
       if (res == LoginResult.unknownError)
         return generateErrorDialog("Unknown Error. Please Try Again Later.");
-      // const userData = await getUserData();
-      if (userType == "Volunteer") return navigate({ page: Volunteer });
-      if (userType == "Senior") return navigate({ page: Senior });
+      const userData = await getUserData();
+      console.error(userData)
+      if (userData.user_type?.Volunteer) return navigate({ page: Volunteer });
+      if (userData.user_type?.Senior) return navigate({ page: Senior });
     } else {
       const res: LoginResult = await createAccount({
         username,

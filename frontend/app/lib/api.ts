@@ -178,7 +178,7 @@ const parseRequestImage = async (json: {picture:string}): Promise<any> => {
 }
 const getAuthorizationString = () : string => {
   const authorizationString = ApplicationSettings.getString("AuthorizationString")
-  console.log(authorizationString);
+  // console.log(authorizationString);
   let parsed: {expirationTime: Number};
   try {
     parsed = JSON.parse(authorizationString)
@@ -196,7 +196,7 @@ const getAuthorizationString = () : string => {
   return authorizationString
 }
 export const createAccount = async (user: UserSignup) : Promise<LoginResult> => {
-  console.log(user);
+  // console.log(user);
   const location = await addressToLonLat(user.address)
   const addressString = await concatAddress(user.address)
   if (location == LonLatRequestError.unknownError) return LoginResult.addressError;
@@ -232,7 +232,7 @@ export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> =
   return LoginResult.success
 }
 export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpRequestResult> => {
-  await console.log(JSON.stringify({authorization: getAuthorizationString()}))
+  // await console.log(JSON.stringify({authorization: getAuthorizationString()}))
   const res = await fetch(`${serverURL}/api/request-help`, {
     method: "POST",
     mode: 'cors',
@@ -261,12 +261,13 @@ export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestEr
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
+  console.error(await res.text())
   if (res.status == 405) return WorkRequestError.notVolunteer
   if (!res.ok) return WorkRequestError.unknownError
   return res.json();
 }
 export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequestByIDResult | WorkRequestError> => {
-  const res = await fetch(`${serverURL}/help-requests`, {
+  const res = await fetch(`${serverURL}/get-request`, {
     method: "POST",
     mode: 'cors',
     headers: {"Content-Type": "application/json"},
@@ -277,14 +278,14 @@ export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequ
   return parseRequestImage(await res.json()) as Promise<WorkRequestByIDResult>;
 }
 export const getUserData = async (): Promise<UserData> => {
-  console.log("bruh")
+  // console.log("bruh")
   const res = await fetch(`${serverURL}/api/user-data`, {
     method: "POST",
     mode: "cors",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({authorization: getAuthorizationString()})
   })
-  console.log("bruh")
+  const json = res.json()
   if (!res.ok) throw "User data not found";
-  return res.json()
+  return json
 }

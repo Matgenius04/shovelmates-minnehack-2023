@@ -17,4 +17,4 @@ For a lotta debug information (shows the request body sent + server response), y
 npm run apitest -- debug
 ```
 
-Let me know if you'd like anything else added. So far the api testing is incomplete
+Let me know if you'd like anything else added. So far the api testing is incomplete. It doesn't quite test getting all the help requests yet for volunteers

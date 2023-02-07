@@ -14,10 +14,12 @@
 
   const getRequests = async (): Promise<WorkRequestByIDResult[]> => {
     const availableJobs = await requestWork();
+    console.error(typeof availableJobs,availableJobs)
     if (typeof availableJobs == typeof WorkRequestError)
       generateErrorDialog("Invalid Request");
     const out = [];
     for (const id of availableJobs as WorkRequestsResult) {
+      console.error("BRUHASDFa",id)
       const workRequest = getWorkRequestByID({ id });
       if (typeof workRequest == typeof Promise<WorkRequestByIDResult>)
         out.push((await workRequest) as WorkRequestByIDResult);

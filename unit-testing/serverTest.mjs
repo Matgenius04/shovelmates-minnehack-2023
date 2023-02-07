@@ -1,6 +1,4 @@
-// for colored chalk support, run
-
-import { readFile } from 'fs/promises'
+import { readFile, rm } from 'fs/promises'
 import { argv } from 'process'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -44,6 +42,8 @@ const helpRequest = {
 }
 
 
+
+const clearDB = async () => await rm(join(dirname(fileURLToPath(import.meta.url),""),"../server/db"),{ recursive: true, force: true })
 
 
 const stateList = {"AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"}
@@ -136,6 +136,13 @@ const requestWork = async () => {
   })
   return res.json()
 }
+const getWorkRequestByID = async (id) => {
+  const res = await apiFetchPost("user-data", {id, authorization: authorizationString}, {
+    "405": "Not Volunteer Error"
+  })
+  return res.json()
+}
+
 
 
 const test = async (testFunction, testName, flip = false) => {
@@ -156,6 +163,11 @@ const test = async (testFunction, testName, flip = false) => {
   if (extraDebug || showServerResponse) await console.log("-".repeat(40))
   else await null;
 }
+
+
+
+await clearDB()
+
 
 
 
@@ -191,4 +203,9 @@ await test((async ()=>{
 // get volunteer user data test
 await test(getUserData, "Get User Data")
 // request work (as volunteer)
-await test(requestWork, "Volunteer Request Work")
+await test(async () => {
+  const availableJobs = await requestWork()
+  if (!availableJobs[0]) throw "No Work Request Found"
+  console.log(availableJobs[0])
+}, "Volunteer Request Work")
+// await test()
