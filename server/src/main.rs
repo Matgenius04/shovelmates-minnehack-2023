@@ -30,13 +30,14 @@ pub enum UserType {
     Senior(Option<String>),
 }
 
-#[derive(Clone, Copy, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(Clone, Copy, Archive, RkyvSerialize, RkyvDeserialize, Debug)]
 #[archive(as = "Self")]
 pub struct Location(f64, f64);
 
 impl From<Location> for geo::Point {
     fn from(value: Location) -> Self {
-        geo::Point::new(value.0, value.1)
+        // Longitude comes before latitude in geo
+        geo::Point::new(value.1, value.0)
     }
 }
 
