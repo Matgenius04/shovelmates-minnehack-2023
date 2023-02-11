@@ -4,7 +4,8 @@
   "description": "Unit Testing for Shovelmates",
   "main": "serverTest.mjs",
   "scripts": {
-    "apitest": "node serverTest.mjs"
+    "apitest": "node serverTest.mjs",
+    "cleardb": "rm -r ../server/db"
   },
   "author": "",
   "license": "ISC",

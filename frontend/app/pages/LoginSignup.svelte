@@ -13,7 +13,7 @@
     createAccount,
     LoginResult,
     checkIfAddressFilledIn,
-  } from "~/lib/api.ts";
+  } from "~/lib/api";
   import Senior from "./Senior.svelte";
 
   import Splash from "./Splash.svelte";
@@ -22,17 +22,33 @@
   export let isLogin: boolean;
   let headerText: String = isLogin ? "Login" : "Signup";
 
-  let username: String = "Username",
-    password: String = "Password",
-    name: String = "Full Name",
-    address: Address = {
-      line1: "511 Kenwood Pkwy",
-      line2: undefined,
-      city: "Minneapolis",
-      state: "MN",
-      zip: "55403",
-    },
-    userType: UserType = "Senior";
+  // Example Senior
+  // let username: String = "Username",
+  //   password: String = "Password",
+  //   name: String = "Full Name",
+  //   address: Address = {
+  //     line1: "511 Kenwood Pkwy",
+  //     line2: undefined,
+  //     city: "Minneapolis",
+  //     state: "MN",
+  //     zip: "55403",
+  //   },
+  //   userType: UserType = "Senior";
+
+  // Example Volunteer
+  let username= "exampleUser",
+  password= "verysecure123",
+  name= "Jane Doe",
+  address= {
+    line1: "1600 Amphitheatre Parkway",
+    line2: undefined,
+    city: "Mountain View",
+    state: "CA",
+    zip: "94043",
+  },
+  userType = "Volunteer"
+
+
   let volunteerButton,
     seniorButton;
   const userTypeOptions = ["Senior", "Volunteer"];

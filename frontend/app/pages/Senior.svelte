@@ -6,7 +6,11 @@
     generateSuccessDialog,
     HelpRequestResult,
     requestHelp,
+    logout
   } from "~/lib/api";
+
+  import { navigate } from "svelte-native";
+  import Splash from "./Splash.svelte";
 
   let picture: string = "";
   let picturePreviewHidden = true;
@@ -39,6 +43,10 @@
 <page>
   <actionBar>
     <label text="Shovelmates" fontSize="25" />
+    <button text="Logout" fontSize="25" on:tap={()=>{
+      logout()
+      navigate({page: Splash})
+    }}></button>
   </actionBar>
   <flexboxLayout flexDirection="column" justifyContent="space-around">
     <stackLayout>

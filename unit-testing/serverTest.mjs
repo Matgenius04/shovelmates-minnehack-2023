@@ -1,5 +1,6 @@
 import { readFile, rm } from 'fs/promises'
-import { argv } from 'process'
+import { argv, stdout } from 'process'
+import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import chalk from 'chalk'
@@ -9,6 +10,10 @@ const serverURL = "http://0.0.0.0:8080"
 // shows request data sent to api
 const extraDebug = argv[2] == 'debug';
 const showServerResponse = extraDebug || argv[2] == 'response';
+
+
+const folderPathOfCurrentFile = dirname(fileURLToPath(import.meta.url))
+
 
 const allUserInfoSenior = {
   username: "Username",
@@ -37,7 +42,7 @@ const allUserInfoVolunteer = {
   userType: "Volunteer"
 }
 const helpRequest = {
-  picture: (await readFile(join(dirname(fileURLToPath(import.meta.url)),"../frontend/app/assets/logo.png"))).toString('base64url'),
+  picture: (await readFile(join(folderPathOfCurrentFile,"../frontend/app/assets/logo.png"))).toString('base64url'),
   notes: "Example Notes here. TESTING testing 1234 boop bop bip bap"
 }
 
@@ -76,7 +81,7 @@ const apiFetchPost = async (endpoint, body, statusErrors={}) => {
   if (extraDebug) console.error(`\nData sent to ${endpoint}: ${chalk.yellow(JSON.stringify(body, null, 2))}\n`)
   if (showServerResponse) console.error(`Server response: ${chalk.cyanBright(outText)}`)
   if (!res.ok) {
-    if (statusErrors[res.status]) throw statusErrors[res.status]
+    if (statusErrors[res.status]) throw `${endpoint} -> ` + statusErrors[res.status]
     throw res.status + " Error"
   }
   return {...res, text:()=>outText, json:()=>{try {return JSON.parse(outText)} catch {throw "Invalid JSON Server Response"}}};
@@ -137,8 +142,21 @@ const requestWork = async () => {
   return res.json()
 }
 const getWorkRequestByID = async (id) => {
-  const res = await apiFetchPost("user-data", {id, authorization: authorizationString}, {
-    "405": "Not Volunteer Error"
+  const res = await apiFetchPost("get-request", {id, authorization: authorizationString}, {
+    "405": "Not Volunteer Error",
+    "409": "Request ID not found"
+  })
+  return res.json()
+}
+const acceptRequest = async (id) => {
+  const res = await apiFetchPost("accept-request", {id, authorization: authorizationString}, {
+    '405': "Not Volunteer Error"
+  })
+  return res.json()
+}
+const getAcceptedRequests = async () => {
+  const res = await apiFetchPost("accepted-requests", {authorization: authorizationString}, {
+    '405': "Not Volunteer Error"
   })
   return res.json()
 }
@@ -167,9 +185,22 @@ const test = async (testFunction, testName, flip = false) => {
 
 
 await clearDB()
+const serverProcess = spawn("cargo",["run"], {
+  cwd: join(folderPathOfCurrentFile, "../server"),
+  // env: {
+  //   "RUST_LOG": "DEBUG"
+  // }
+})
+const serverReady = () => {
+  return new Promise((res, rej) => {
+    serverProcess.stderr.on('data', chunk=>{
+      if (chunk.toString().includes('Running')) setTimeout(res,30)
+    })
+    serverProcess.once('error', rej)
+  })
+}
 
-
-
+await serverReady()
 
 // TESTS
 // create senior account test
@@ -202,10 +233,20 @@ await test((async ()=>{
 }),"Volunteer Account Creation")
 // get volunteer user data test
 await test(getUserData, "Get User Data")
-// request work (as volunteer)
+// request work (as volunteer) and accept the first request
 await test(async () => {
   const availableJobs = await requestWork()
   if (!availableJobs[0]) throw "No Work Request Found"
-  console.log(availableJobs[0])
+  // console.log(availableJobs[0])
+  for (const jobId of availableJobs) {
+    // console.log("Job ID:",jobId)
+    const workRequest = getWorkRequestByID(jobId[1])
+    if (!workRequest) throw `Work Request ID ${job} Was Not Found`
+    // if (!extraDebug) console.log(await workRequest)
+    const accepted = await acceptRequest(jobId[1])
+    console.log(accepted)
+  }
 }, "Volunteer Request Work")
-// await test()
+
+await serverProcess.kill()
+await clearDB()

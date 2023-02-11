@@ -244,7 +244,7 @@ export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpReques
   return HelpRequestResult.success;
 }
 export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestResult> => {
-  const res = await fetch(`${serverURL}/help-requests`, {
+  const res = await fetch(`${serverURL}/api/help-requests`, {
     method: "POST",
     mode: 'cors',
     headers: {"Content-Type": "application/json"},
@@ -255,7 +255,7 @@ export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestR
   return parseRequestImage(await res.json());
 }
 export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestError> => {
-  const res = await fetch(`${serverURL}/request-work`, {
+  const res = await fetch(`${serverURL}/api/request-work`, {
     method: "POST",
     mode: 'cors',
     headers: {"Content-Type": "application/json"},
@@ -267,7 +267,7 @@ export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestEr
   return res.json();
 }
 export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequestByIDResult | WorkRequestError> => {
-  const res = await fetch(`${serverURL}/get-request`, {
+  const res = await fetch(`${serverURL}/api/get-request`, {
     method: "POST",
     mode: 'cors',
     headers: {"Content-Type": "application/json"},
@@ -278,7 +278,6 @@ export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequ
   return parseRequestImage(await res.json()) as Promise<WorkRequestByIDResult>;
 }
 export const getUserData = async (): Promise<UserData> => {
-  // console.log("bruh")
   const res = await fetch(`${serverURL}/api/user-data`, {
     method: "POST",
     mode: "cors",
@@ -288,4 +287,7 @@ export const getUserData = async (): Promise<UserData> => {
   const json = res.json()
   if (!res.ok) throw "User data not found";
   return json
+}
+export const logout = async (): Promise<void> => {
+  await ApplicationSettings.remove("AuthorizationString")
 }

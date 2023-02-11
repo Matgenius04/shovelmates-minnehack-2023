@@ -3,6 +3,9 @@
   "main": "app/app.ts",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "dev": "ns run android"
+  },
   "dependencies": {
     "@nativescript/camera": "^5.0.15",
     "@nativescript/core": "~8.4.0",

@@ -4,6 +4,7 @@
   import {
     generateErrorDialog,
     getWorkRequestByID,
+    logout,
     requestWork,
     WorkRequestByIDResult,
     WorkRequestError,
@@ -11,6 +12,8 @@
   } from "~/lib/api";
 
   import { Template } from 'svelte-native/components'
+    import { navigate } from "svelte-native";
+    import Splash from "./Splash.svelte";
 
   const getRequests = async (): Promise<WorkRequestByIDResult[]> => {
     const availableJobs = await requestWork();
@@ -27,25 +30,30 @@
     return out;
   };
   let workRequests = getRequests();
+  (async ()=>{console.log(await getRequests())})()
 </script>
 
 <page>
   <actionBar>
     <label text="Shovelmates" fontSize="25" />
+    <button text="Logout" fontSize="25" on:tap={()=>{
+      logout()
+      navigate({page: Splash})
+    }}></button>
   </actionBar>
   <flexboxLayout flexDirection="column">
     <label text="Volunteer Opportunities" fontSize="20" alignSelf="center">
       {#await workRequests then awaitedWorkRequests}
         <listView items={awaitedWorkRequests}>
-          <Template let:item>
-            <flexboxLayout flexDirection="row" width="90%" margin="auto">
-              <label text={item.user.name} alignSelf="center"/>
-              <image src={item.picture} alignSelf="center" stretch="aspectFit"/>
+          <Template let:item={workRequest}>
+            <flexboxLayout flexDirection="row" width="90%" margin="auto" style="background-color: blue;">
+              <label text={workRequest.user.name} alignSelf="center"/>
+              <image src={workRequest.picture} alignSelf="center" stretch="aspectFit"/>
               <flexboxLayout flexWrap="wrap" width="50%">
-                <label text={item.notes} />
+                <label text={workRequest.notes} />
               </flexboxLayout>
-              <label text={item.dist.toString()} />
-              <label text={item.address} />
+              <label text={workRequest.dist.toString()} />
+              <label text={workRequest.address} />
               <button text="Accept Request"></button>
             </flexboxLayout>
           </Template>
