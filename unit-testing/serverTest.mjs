@@ -160,6 +160,12 @@ const getAcceptedRequests = async () => {
   })
   return res.json()
 }
+const markRequestAsCompleted = async (id) => {
+  const res = await apiFetchPost("mark-request-completed", {id, authorization: authorizationString},{
+    '409': "Id nonexistent or not previously accepted by this user"
+  })
+  return res.json()
+}
 
 
 
@@ -245,6 +251,12 @@ await test(async () => {
     // if (!extraDebug) console.log(await workRequest)
     const accepted = await acceptRequest(jobId[1])
     console.log(accepted)
+    const completed = await markRequestAsCompleted(jobId[1])
+    console.log(completed)
+  }
+  const allAccepted = await getAcceptedRequests()
+  if (allAccepted.json().length != availableJobs.length) {
+    throw "Some Accepted Requests Failed?"
   }
 }, "Volunteer Request Work")
 

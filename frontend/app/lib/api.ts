@@ -195,23 +195,29 @@ const getAuthorizationString = () : string => {
   }
   return authorizationString
 }
+const apiFetchPost = async (endpoint: string, data: Object): Promise<any> => {
+  const res = await fetch(`${serverURL}/api/${endpoint}`, {
+    method: "POST",
+    mode: "cors",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(data)
+  })
+  const outText = await res.text();
+  return {...res, text:()=>outText, json:()=>{try {return JSON.parse(outText)} catch {console.error("Invalid JSON")}}}
+}
+
 export const createAccount = async (user: UserSignup) : Promise<LoginResult> => {
   // console.log(user);
   const location = await addressToLonLat(user.address)
   const addressString = await concatAddress(user.address)
   if (location == LonLatRequestError.unknownError) return LoginResult.addressError;
-  const res = await fetch(`${serverURL}/api/create-account`, {
-    method: "POST",
-    mode: "cors",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
+  const res = await apiFetchPost(`create-account`, {
       username: user.username, 
       name: user.name,
       address: addressString,
       location,
       userType: user.userType,
       password: user.password
-    })
   })
   if (res.status == 409) return LoginResult.usernameError;
   if (!res.ok) return LoginResult.unknownError;
@@ -219,12 +225,7 @@ export const createAccount = async (user: UserSignup) : Promise<LoginResult> => 
   return LoginResult.success;
 }
 export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> => {
-  const res = await fetch(`${serverURL}/api/login`, {
-    method: "POST",
-    mode: 'cors',
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(loginInfo)
-  })
+  const res = await apiFetchPost("login", loginInfo)
   if (res.status == 409) return LoginResult.usernameError;
   if (res.status == 403) return LoginResult.passwordError;
   if (!res.ok) return LoginResult.unknownError;
@@ -233,61 +234,47 @@ export const login = async (loginInfo: LoginParameters) : Promise<LoginResult> =
 }
 export const requestHelp = async (helpRequest: HelpRequest) : Promise<HelpRequestResult> => {
   // await console.log(JSON.stringify({authorization: getAuthorizationString()}))
-  const res = await fetch(`${serverURL}/api/request-help`, {
-    method: "POST",
-    mode: 'cors',
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({authorization: getAuthorizationString(), ...helpRequest})
+  const res = await apiFetchPost("request-help", {
+    authorization: getAuthorizationString(),
+    ...helpRequest
   })
   if (res.status == 405) return HelpRequestResult.notSenior
   if (!res.ok) return HelpRequestResult.unknownError
   return HelpRequestResult.success;
 }
 export const getSelfRequest = async () : Promise<SelfRequestError | SelfRequestResult> => {
-  const res = await fetch(`${serverURL}/api/help-requests`, {
-    method: "POST",
-    mode: 'cors',
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({authorization: getAuthorizationString()})
+  const res = await apiFetchPost(`help-requests`, {
+    authorization: getAuthorizationString()
   })
   if (res.status == 409) return SelfRequestError.nonexistentError
   if (!res.ok) return SelfRequestError.unknownError
   return parseRequestImage(await res.json());
 }
 export const requestWork = async () : Promise<WorkRequestsResult | WorkRequestError> => {
-  const res = await fetch(`${serverURL}/api/request-work`, {
-    method: "POST",
-    mode: 'cors',
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({authorization: getAuthorizationString()})
+  const res = await apiFetchPost("request-work", {
+    authorization: getAuthorizationString()
   })
-  console.error(await res.text())
   if (res.status == 405) return WorkRequestError.notVolunteer
   if (!res.ok) return WorkRequestError.unknownError
   return res.json();
 }
 export const getWorkRequestByID = async (id: WorkRequestByID) : Promise<WorkRequestByIDResult | WorkRequestError> => {
-  const res = await fetch(`${serverURL}/api/get-request`, {
-    method: "POST",
-    mode: 'cors',
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({...id, authorization: getAuthorizationString()})
+  const res = await apiFetchPost("get-request", {
+    ...id, 
+    authorization: getAuthorizationString()
   })
   if (res.status == 405) return WorkRequestError.notVolunteer
   if (!res.ok) return WorkRequestError.unknownError
   return parseRequestImage(await res.json()) as Promise<WorkRequestByIDResult>;
 }
 export const getUserData = async (): Promise<UserData> => {
-  const res = await fetch(`${serverURL}/api/user-data`, {
-    method: "POST",
-    mode: "cors",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({authorization: getAuthorizationString()})
+  const res = await apiFetchPost("user-data", {
+    authorization: getAuthorizationString()
   })
-  const json = res.json()
   if (!res.ok) throw "User data not found";
-  return json
+  return res.json()
 }
 export const logout = async (): Promise<void> => {
   await ApplicationSettings.remove("AuthorizationString")
+  await navigate({page: Splash})
 }
