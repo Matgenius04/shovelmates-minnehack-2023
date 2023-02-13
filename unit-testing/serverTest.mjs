@@ -255,7 +255,7 @@ await test(async () => {
     console.log(completed)
   }
   const allAccepted = await getAcceptedRequests()
-  if (allAccepted.json().length != availableJobs.length) {
+  if (allAccepted.length != availableJobs.length) {
     throw "Some Accepted Requests Failed?"
   }
 }, "Volunteer Request Work")

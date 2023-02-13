@@ -67,7 +67,7 @@ pub fn volunteering_filters(
             })
         });
 
-    let accept_request = warp::path!("api" / "get-request")
+    let accept_request = warp::path!("api" / "accept-request")
         .and(bytes())
         .and(clone_dbs(user_db, help_requests))
         .map(move |bytes, users_db, requests_db| accept_request(&bytes, &users_db, &requests_db));
@@ -201,7 +201,7 @@ fn accept_request(
                 _ => return Err(Error::NotVolunteer.into()),
             };
 
-            let mut help_request = match help_requests.get(&id)? {
+            let mut help_request = match requests_db.get(&id)? {
                 Some(v) => v,
                 None => return Err(Error::RequestDoesntExist.into()),
             }
@@ -217,7 +217,7 @@ fn accept_request(
 
             user_db.add(&username, &user)?;
 
-            Ok(Body::empty())
+            Ok(Body::from("{}"))
         })
         .map_err(|e| e.into())
 }
@@ -254,7 +254,7 @@ fn marking_as_completed(
 
             requests_db.add(&id, &request)?;
 
-            Ok(Body::empty())
+            Ok(Body::from("{}"))
         })
         .map_err(|e| e.into())
 }
